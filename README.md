@@ -27,6 +27,18 @@ Open `index.html` in any modern desktop or mobile browser. You can also enable *
 | **Peg ownership** | versus | Orbit a peg for 1 s to paint it your color. Rivals overheat your pegs 2× faster, and each lap around your own peg adds +1 mote in your set color. |
 | **Bounty** | versus | The leader wears a 👑. Slicing their tail instantly pays you half of what that tail would have banked. |
 
+## Thrills
+
+| Feature | What happens |
+|---|---|
+| **Near misses** | Skim a rock (+1 mote), the sun's core (+2, *Sungrazer*) or a black hole (+2, *Event Horizon*) without dying. |
+| **Slingshot** | Let go near top speed for a SLINGSHOT callout, speed lines and a zoom punch. |
+| **Slow motion** | Huge banks, perfect sets, bounties, boss kills and the final moment of a match slow time down (offline). Online it's a visual punch only, so the shared simulation stays fair. |
+| **Boss waves** | Every 5th wave in solo/co-op. **The Devourer**: a giant hunter whose jaws are lethal; slice 4+ motes off its tail to wound it, or lure it into rocks or the sun. **The Singularity**: a drifting black hole that bends your flight and swallows dust; survive until it collapses into treasure. |
+| **Map events** | Every ~30 s in every mode: Meteor Shower, Dust Bloom, Peg Blackout, Solar Flare (bigger corona). Mirrored in versus for fairness. |
+| **Records** | 18 achievements and lifetime stats, saved locally. Open them from **Records** on the title screen. |
+| **Spectating** | **Watch** a full 4-bot exhibition match from the title screen, or tick *Join as a spectator* to watch an online room without playing. |
+
 ## Modes
 
 | Mode | Description |
