@@ -17,6 +17,16 @@ Release the button to fling off in a straight line. Anything that crosses your t
 
 Open `index.html` in any modern desktop or mobile browser. You can also enable **GitHub Pages** (Settings → Pages → `main` / root) and play at `https://eseto9.github.io/Comet-Tails/`.
 
+## Strategy layer
+
+| Feature | Modes | How it works |
+|---|---|---|
+| **Color sets** | all | Stardust comes in gold, ember and nebula. A tail that is 75%+ one color (5+ motes) banks for **×1.5**, and 100% one color (8+) for **×2**. Prisms take your tail's main color. Your comet shows the live set % under it. |
+| **Unstable dust** | all | Flashing red, worth 5 motes, spawns near the corona or the edges. It decays out of your tail after 8 s unless you bank. |
+| **Perk draft** | solo, co-op | After every wave, pick 1 of 3 team upgrades: Magnet+, Heat Sink, Tail Plating, Greed, Slipstream, Repair, Solar Flare, Spin Up, Prismatic, Stabilizer. Choices replay exactly in the Daily ghost. |
+| **Peg ownership** | versus | Orbit a peg for 1 s to paint it your color. Rivals overheat your pegs 2× faster, and each lap around your own peg adds +1 mote in your set color. |
+| **Bounty** | versus | The leader wears a 👑. Slicing their tail instantly pays you half of what that tail would have banked. |
+
 ## Modes
 
 | Mode | Description |

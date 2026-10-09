@@ -79,6 +79,9 @@ kbd{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;border
 .big{font-size:44px;font-weight:900;text-align:center;letter-spacing:-1px}
 .res{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;margin-bottom:6px;background:rgba(0,0,0,.25)}
 .res .rk{font-weight:900;width:26px;color:var(--dim)} .res .nm{flex:1;font-weight:800} .res .sc{font-weight:900;font-variant-numeric:tabular-nums}
+.perk{display:flex;gap:14px;align-items:center;text-align:left;padding:14px 16px}
+.perk .pi{font-size:30px;flex:none}.perk .pn{font-size:17px}.perk .pd{display:block;font-size:12px;font-weight:600;opacity:.8;margin-top:3px;letter-spacing:.3px}.perk .pk{font-size:11px;opacity:.6}
+.perk.hl{border-color:var(--c4);box-shadow:0 0 24px rgba(141,255,106,.35);transform:translateY(-2px)}
 .res.win{background:linear-gradient(90deg,rgba(255,196,77,.25),rgba(0,0,0,.2));border:1px solid rgba(255,196,77,.5)}
 </style>
 </head>
@@ -122,6 +125,11 @@ kbd{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;border
       <li>Fly through <b>stardust</b> to grow your tail. Golden prisms are worth 3.</li>
       <li>Graze the sun's glowing <b>corona</b> to <b>bank</b> your tail. Payout is triangular: a tail of <i>n</i> pays 1+2+…+n. Long tails pay hugely — but don't touch the white-hot core.</li>
       <li>Anchors <b>overheat</b> if orbited too long (shared between everyone!).</li>
+      <li><b>Color sets</b>: stardust comes in <b style="color:#ffc84a">gold</b>, <b style="color:#ff7a59">ember</b> and <b style="color:#b98cff">nebula</b>. Bank a tail that's 75%+ one color (5+ motes) for <b>×1.5</b>, or 100% one color (8+) for <b>×2</b>. Prisms take your tail's main color.</li>
+      <li><b style="color:#ff3b4e">Unstable dust</b> (flashing red, spawns near the corona and edges) is worth 5 — but it decays out of your tail after 8 s unless you bank.</li>
+      <li><b>Perk draft</b> (solo / co-op): after every wave pick 1 of 3 upgrades. Build safe or greedy.</li>
+      <li><b>Peg ownership</b> (versus): orbit a peg for 1 s to paint it your color. Rivals overheat your pegs twice as fast, and every lap around your own peg adds +1 mote.</li>
+      <li><b>Bounty</b> (versus): the leader wears a 👑. Slicing their tail pays you half of what it was worth, instantly.</li>
       <li>Anything crossing your tail <b>severs</b> it and scatters the dust. Asteroids do it. Rivals do it on purpose.</li>
       <li>Solo: 3 hulls. Bank a tail of 20+ to repair one. Waves escalate; rogue comets hunt your tail.</li>
       <li><b>Co-op Comet Train</b>: teammates within the dashed link beam bank together as ONE tail — 10 + 10 pays 210, not 110. Shared hulls, no friendly fire.</li>
@@ -221,6 +229,15 @@ kbd{display:inline-block;min-width:22px;padding:1px 6px;border-radius:6px;border
     </div>
   </section>
 
+  <!-- PERK DRAFT -->
+  <section class="screen" id="s-draft">
+    <div class="big" id="draft-title" style="font-size:30px">Wave cleared!</div>
+    <div class="tag" style="margin:6px 0 14px">choose one perk for your team</div>
+    <div class="col" id="draft-cards"></div>
+    <p class="foot" id="draft-hint">Click / tap a card · keys <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> · or press your button to move and <kbd>Enter</kbd> / Start to choose</p>
+    <p class="foot" id="draft-timer"></p>
+  </section>
+
   <!-- PAUSE -->
   <section class="screen" id="s-pause">
     <h2 id="pause-title">Paused</h2>
@@ -300,6 +317,13 @@ const CFG = {
   // Co-op ("Comet Train")
   COOP_LIVES: 4,             // shared hull pool
   COOP_LINK_R: 280,          // teammates this close bank their tails together
+  // Strategy layer
+  CLAIM_TIME: 1.0,           // seconds orbiting a peg to paint it your color (versus)
+  TOLL_HEAT: 2,              // rivals overheat your pegs this many times faster
+  BOUNTY_FRAC: 0.5,          // slicing the leader pays this share of the severed tail's bank value
+  UNSTABLE_EVERY: 11, UNSTABLE_LIFE: 12, UNSTABLE_DECAY: 8, UNSTABLE_VALUE: 5,
+  SET_MIN: 5, SET_PURE: 0.75, SET_PERFECT_MIN: 8, // tail color sets: >=75% one color = x1.5, all one color (8+) = x2
+  DRAFT_TIMEOUT_ONLINE: 20,  // online co-op: auto-pick if nobody chooses
   // Net
   SNAPSHOT_EVERY: 2,         // ticks between snapshots (60/2 = 30 Hz)
   INTERP_TICKS: 6,           // remote entities rendered ~100 ms in the past
@@ -313,6 +337,10 @@ const TICK_MS = 1000 / CFG.TICK_HZ;
 const PCOLORS = ['#4df3ff', '#ff4fd8', '#ffc44d', '#8dff6a'];
 const PNAMES = ['Cyan', 'Rose', 'Amber', 'Lime'];
 const ROGUE_COLOR = '#ff4a3d';
+const DUST_HUES = ['#ffc84a', '#ff7a59', '#b98cff'];   // set colors: Sun gold, Ember, Nebula violet
+const DUST_HUE_NAMES = ['GOLD', 'EMBER', 'NEBULA'];
+const UNSTABLE_COLOR = '#ff3b4e';
+const hueColor = h => h === 3 ? UNSTABLE_COLOR : DUST_HUES[h] || '#ffffff';
 
 // ============================== 2. UTILITIES ==============================
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -449,8 +477,48 @@ const LAYOUT_NAMES = ['Crown', 'Lattice', 'Pinwheel'];
 
 function ev(w, e) { w.events.push(e); }
 
-const isPvE = w => w.mode !== 'vs';                      // solo + co-op share waves, lives and rogues
+const isPvE = w => w.mode !== 'vs';                      // solo + co-op share waves, lives, rogues and perks
 const teammates = (w, a, b) => w.mode === 'coop' && !a.rogue && !b.rogue;
+const tri = n => n * (n + 1) / 2;                         // bank payout for a tail of n
+
+// ---------- Perks: drafted between waves in solo / co-op (team-wide, stackable) ----------
+const PERKS = {
+  magnet:   { name: 'Magnet+',      icon: '🧲', desc: 'Stardust is pulled in from 50% farther away.', max: 3 },
+  heatsink: { name: 'Heat Sink',    icon: '❄️', desc: 'Pegs heat up 35% slower for your team.', max: 2 },
+  plating:  { name: 'Tail Plating', icon: '🛡️', desc: 'Once per wave, a cut only takes your last 3 motes.', max: 3 },
+  greed:    { name: 'Greed',        icon: '💰', desc: 'Banks pay +25%… but you lose a hull now.', max: 3 },
+  slip:     { name: 'Slipstream',   icon: '💨', desc: 'You keep your speed much longer after letting go.', max: 2 },
+  hull:     { name: 'Repair',       icon: '🔧', desc: '+1 hull right now.', max: 9 },
+  corona:   { name: 'Solar Flare',  icon: '☀️', desc: 'Your corona is 15% bigger: easier banking.', max: 2 },
+  spin:     { name: 'Spin Up',      icon: '🌀', desc: 'Orbiting builds speed 50% faster.', max: 2 },
+  prism:    { name: 'Prismatic',    icon: '💎', desc: 'Prisms (worth 3) appear twice as often.', max: 2 },
+  stable:   { name: 'Stabilizer',   icon: '⚛️', desc: 'Unstable dust in your tail lasts 6 s longer.', max: 2 },
+};
+const perk = (w, c, id) => (c && c.rogue) || !w.perks ? 0 : w.perks[id] || 0;
+function draftOffers(w) {
+  const pool = Object.keys(PERKS).filter(id => (w.perks[id] || 0) < PERKS[id].max
+    && !(id === 'greed' && w.lives <= 1) && !(id === 'hull' && w.lives >= CFG.MAX_LIVES));
+  const out = [];
+  while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(w.rng() * pool.length), 1)[0]);
+  return out;
+}
+function applyPerk(w, id) {
+  w.perks[id] = (w.perks[id] || 0) + 1;
+  if (id === 'hull') w.lives++;
+  if (id === 'greed') w.lives = Math.max(1, w.lives - 1);
+  if (id === 'plating') for (const c of w.comets) if (!c.rogue) c.plates = w.perks.plating;
+  ev(w, { type: 'perk', id });
+}
+
+// ---------- Sets: stardust comes in 3 colors; a mostly one-color tail banks for more ----------
+function hueCounts(hues) { const k = [0, 0, 0]; for (const h of hues) if (h >= 0 && h < 3) k[h]++; return k; }
+function dominantHue(tail) { const k = hueCounts(tail.map(m => m.h)), m = Math.max(...k); return m ? k.indexOf(m) : -1; }
+function setBonus(hues) {
+  const k = hueCounts(hues), colored = k[0] + k[1] + k[2], top = Math.max(...k), hue = k.indexOf(top);
+  if (colored >= CFG.SET_PERFECT_MIN && top === colored) return { mult: 2, name: 'PERFECT SET', hue };
+  if (colored >= CFG.SET_MIN && top / colored >= CFG.SET_PURE) return { mult: 1.5, name: 'PURE SET', hue };
+  return { mult: 1, name: '', hue: -1 };
+}
 
 /** Create a world. opts: { mode:'solo'|'vs'|'coop', players:[{pid,name,color,bot,skill}], seed, layout, demo } */
 function createWorld(opts) {
@@ -460,9 +528,10 @@ function createWorld(opts) {
     phase: 'countdown', countdown: opts.mode === 'solo' ? CFG.COUNTDOWN_SOLO : CFG.COUNTDOWN_VS,
     elapsed: 0, timeLeft: CFG.MATCH_SECONDS, supernova: false, wave: 1, lives: opts.mode === 'coop' ? CFG.COOP_LIVES : CFG.SOLO_LIVES, overT: 0, teamScore: 0,
     anchors: [], dust: [], asteroids: [], comets: [], events: [], dustT: 0, astT: 2, drift: 0,
+    perks: {}, draft: null, draftT: 0, pendingPick: null, leader: -1, unstT: CFG.UNSTABLE_EVERY * 0.6,
     layout: opts.layout != null ? opts.layout : Math.floor(mulberry32(seed + 7)() * LAYOUTS.length),
   };
-  LAYOUTS[w.layout].forEach(([dx, dy], i) => w.anchors.push({ x: CX + dx, y: CY + dy, hx: CX + dx, hy: CY + dy, ph: i * 1.7, heat: 0, off: false, offT: 0, users: 0 }));
+  LAYOUTS[w.layout].forEach(([dx, dy], i) => w.anchors.push({ x: CX + dx, y: CY + dy, hx: CX + dx, hy: CY + dy, ph: i * 1.7, heat: 0, off: false, offT: 0, users: 0, owner: -1 }));
   opts.players.forEach((p, i) => addComet(w, p, i, opts.players.length));
   for (let i = 0; i < 60 && ambientCount(w) < dustTarget(w); i++) spawnDustGroup(w);
   if (w.mode === 'vs') spawnAsteroidPair(w);
@@ -481,6 +550,7 @@ function addComet(w, p, slot, n) {
     x: pose.x, y: pose.y, vx: pose.vx * CFG.START_SPEED, vy: pose.vy * CFG.START_SPEED, speed: CFG.START_SPEED,
     latch: -1, ang: 0, orbitR: 0, dir: 1, freeT: 1, held: false, tail: [],
     dead: false, respawnT: 0, inv: 1, score: 0, banked: 0, best: 0, cuts: 0,
+    plates: 0, unstableT: 0, claimT: 0, orbitAcc: 0, bounties: 0,
     ai: p.bot ? newAI(w, p.skill != null ? p.skill : 0.75, !!p.rogue) : null,
   };
   w.comets.push(c);
@@ -511,7 +581,7 @@ function stepComet(w, c, held, dt) {
     if (ai >= 0) {
       const A = w.anchors[ai], dx = c.x - A.x, dy = c.y - A.y, r = Math.hypot(dx, dy) || 1;
       c.latch = ai; c.orbitR = Math.max(CFG.MIN_ORBIT_R, r); c.ang = Math.atan2(dy, dx);
-      c.dir = (dx * c.vy - dy * c.vx) >= 0 ? 1 : -1;
+      c.dir = (dx * c.vy - dy * c.vx) >= 0 ? 1 : -1; c.claimT = 0; c.orbitAcc = 0;
       ev(w, { type: 'latch', pid: c.pid, a: ai });
     }
   }
@@ -519,7 +589,9 @@ function stepComet(w, c, held, dt) {
     const A = w.anchors[c.latch];
     if (A.off) { c.latch = -1; c.freeT = 0; }
     else {
-      A.users++; A.heat += CFG.HEAT_RATE * dt;
+      // rivals pay a "toll" on pegs you own: they overheat them twice as fast
+      const toll = A.owner >= 0 && A.owner !== c.pid ? CFG.TOLL_HEAT : 1;
+      A.users++; A.heat += CFG.HEAT_RATE * dt * toll * Math.pow(0.65, perk(w, c, 'heatsink'));
       if (A.heat >= 1) {
         A.heat = 1; A.off = true; A.offT = CFG.OVERHEAT_TIME;
         ev(w, { type: 'overheat', a: c.latch, x: A.x, y: A.y }); c.latch = -1; c.freeT = 0;
@@ -528,14 +600,16 @@ function stepComet(w, c, held, dt) {
   }
   if (c.latch >= 0) {
     const A = w.anchors[c.latch];
-    c.speed = Math.min(CFG.MAX_SPEED, c.speed + CFG.SPIN_ACCEL * dt);
-    c.ang += c.dir * c.speed / c.orbitR * dt;
+    c.speed = Math.min(CFG.MAX_SPEED, c.speed + CFG.SPIN_ACCEL * (1 + 0.5 * perk(w, c, 'spin')) * dt);
+    const dAng = c.speed / c.orbitR * dt;
+    c.ang += c.dir * dAng; c.orbitAcc += dAng;
     const ca = Math.cos(c.ang), sa = Math.sin(c.ang);
     c.x = A.x + ca * c.orbitR; c.y = A.y + sa * c.orbitR;
     c.vx = -sa * c.dir * c.speed; c.vy = ca * c.dir * c.speed;
   } else {
     c.freeT += dt;
-    if (c.speed > CFG.MIN_SPEED) c.speed += (CFG.MIN_SPEED - c.speed) * (1 - Math.exp(-CFG.FREE_DRAG * dt));
+    const drag = CFG.FREE_DRAG * Math.pow(0.5, perk(w, c, 'slip'));
+    if (c.speed > CFG.MIN_SPEED) c.speed += (CFG.MIN_SPEED - c.speed) * (1 - Math.exp(-drag * dt));
     const m = Math.hypot(c.vx, c.vy) || 1; c.vx = c.vx / m * c.speed; c.vy = c.vy / m * c.speed;
     c.x += c.vx * dt; c.y += c.vy * dt;
   }
@@ -558,35 +632,46 @@ function updateTail(c) {
     px = m.x; py = m.y;
   }
 }
-function growTail(c, k) {
+/** Add k motes of hue h (0-2 = set colors, 3 = unstable). */
+function growTail(c, k, h) {
   for (let i = 0; i < k && c.tail.length < CFG.TAIL_MAX; i++) {
     const last = c.tail.length ? c.tail[c.tail.length - 1] : c;
-    c.tail.push({ x: last.x, y: last.y });
+    c.tail.push({ x: last.x, y: last.y, h });
   }
 }
 
 // ---------- dust ----------
+// kind 0 = stardust (hue 0-2), 1 = prism (worth 3, takes your tail's main color), 2 = unstable (worth 5, decays)
 const dustTarget = w => w.mode === 'solo' ? CFG.DUST_TARGET_SOLO : CFG.DUST_TARGET_VS;
 const ambientCount = w => { let n = 0; for (const d of w.dust) if (!d.life) n++; return n; };
-function spawnDust(w, x, y, kind, vx = 0, vy = 0, life = 0) {
-  const d = { id: w.nextId++, x, y, vx, vy, kind, life, delay: life ? CFG.SCATTER_PICKUP_DELAY : 0 };
+function spawnDust(w, x, y, kind, vx = 0, vy = 0, life = 0, h = 0) {
+  const d = { id: w.nextId++, x, y, vx, vy, kind, life, h, delay: life && kind !== 2 ? CFG.SCATTER_PICKUP_DELAY : 0 };
   w.dust.push(d); return d;
 }
-/** Spawns a single mote or a short arc ("constellation"). Mirrored through the sun in versus. */
+/** Spawns a single mote or a one-color arc ("constellation"). Mirrored through the sun in versus. */
 function spawnDustGroup(w) {
   const R = w.rng;
   let x, y, tries = 0;
   do { x = 90 + R() * (CFG.W - 180); y = 90 + R() * (CFG.H - 180); } while (dist2(x, y, CX, CY) < (CFG.BANK_R + 90) ** 2 && ++tries < 20);
-  const pts = [];
-  if (R() < 0.4) {
+  const pts = [], hue = Math.floor(R() * 3);
+  if (R() < 0.45) {
     const a = R() * TAU, bend = (R() - 0.5) * 0.6;
     for (let i = 0; i < 4; i++) pts.push([x + Math.cos(a + bend * i) * i * 30, y + Math.sin(a + bend * i) * i * 30, 0]);
-  } else pts.push([x, y, R() < CFG.PRISM_CHANCE ? 1 : 0]);
+  } else pts.push([x, y, R() < CFG.PRISM_CHANCE * Math.pow(2, w.perks.prism || 0) ? 1 : 0]);
   for (const [px, py, k] of pts) {
     if (px < 30 || py < 30 || px > CFG.W - 30 || py > CFG.H - 30) continue;
-    spawnDust(w, px, py, k);
-    if (w.mode === 'vs') spawnDust(w, CFG.W - px, CFG.H - py, k);
+    spawnDust(w, px, py, k, 0, 0, 0, k === 1 ? -1 : hue);
+    if (w.mode === 'vs') spawnDust(w, CFG.W - px, CFG.H - py, k, 0, 0, 0, k === 1 ? -1 : hue);
   }
+}
+/** Unstable dust: worth a lot, spawns somewhere risky (hugging the corona or an edge), decays in your tail. */
+function spawnUnstable(w) {
+  const R = w.rng; let x, y;
+  if (R() < 0.6) { const a = R() * TAU, r = CFG.BANK_R + 55 + R() * 70; x = CX + Math.cos(a) * r; y = CY + Math.sin(a) * r * 0.8; }
+  else { const s = Math.floor(R() * 4), m = 45 + R() * 40; x = s < 2 ? (s ? CFG.W - m : m) : 120 + R() * (CFG.W - 240); y = s >= 2 ? (s === 3 ? CFG.H - m : m) : 120 + R() * (CFG.H - 240); }
+  spawnDust(w, x, y, 2, 0, 0, CFG.UNSTABLE_LIFE, 3);
+  if (w.mode === 'vs') spawnDust(w, CFG.W - x, CFG.H - y, 2, 0, 0, CFG.UNSTABLE_LIFE, 3);
+  ev(w, { type: 'unstable', x, y });
 }
 
 // ---------- asteroids ----------
@@ -612,29 +697,39 @@ function spawnAsteroidPair(w) {
 function scatterTail(w, c, j) {
   const removed = c.tail.splice(j);
   for (const m of removed) {
-    const a = w.rng() * TAU, s = 50 + w.rng() * 150;
-    spawnDust(w, m.x, m.y, 0, Math.cos(a) * s, Math.sin(a) * s, CFG.SCATTER_LIFE + w.rng());
+    const a = w.rng() * TAU, s = 50 + w.rng() * 150, unstable = m.h === 3;
+    spawnDust(w, m.x, m.y, unstable ? 2 : 0, Math.cos(a) * s, Math.sin(a) * s, unstable ? 4 : CFG.SCATTER_LIFE + w.rng(), m.h);
   }
+  if (!c.tail.some(m => m.h === 3)) c.unstableT = 0;
   return removed.length;
 }
 function cutTail(w, victim, j, cutter) {
+  let plated = false;
+  if (victim.plates > 0 && victim.tail.length - j > 3) { j = victim.tail.length - 3; victim.plates--; plated = true; }
   const m = victim.tail[j]; const n = scatterTail(w, victim, j);
   if (n <= 0) return;
-  if (cutter) cutter.cuts++;
-  ev(w, { type: 'cut', pid: victim.pid, by: cutter ? cutter.pid : -1, n, x: m.x, y: m.y });
+  let bounty = 0;
+  if (cutter) {
+    cutter.cuts++;
+    // bounty: slicing the current leader pays you a share of what they would have banked
+    if (w.mode === 'vs' && victim.pid === w.leader) { bounty = Math.round(tri(n) * CFG.BOUNTY_FRAC); cutter.score += bounty; cutter.bounties++; }
+  }
+  ev(w, { type: 'cut', pid: victim.pid, by: cutter ? cutter.pid : -1, n, x: m.x, y: m.y, bounty, plated });
 }
 function bank(w, c) {
-  const trail = []; for (const m of c.tail) trail.push(Math.round(m.x), Math.round(m.y));
-  let n = c.tail.length, linked = 0; c.tail.length = 0;
+  const trail = [], hues = [];
+  const take = o => { for (const m of o.tail) { trail.push(Math.round(m.x), Math.round(m.y)); hues.push(m.h); } o.tail.length = 0; o.unstableT = 0; };
+  take(c); let linked = 0;
   // Co-op "Comet Train": every teammate within link range banks with you as ONE long tail
   if (w.mode === 'coop' && !c.rogue) for (const o of w.comets) {
     if (o === c || o.rogue || o.dead || !o.tail.length || dist2(o.x, o.y, c.x, c.y) > CFG.COOP_LINK_R ** 2) continue;
-    for (const m of o.tail) trail.push(Math.round(m.x), Math.round(m.y));
-    n += o.tail.length; o.tail.length = 0; linked++;
+    take(o); linked++;
   }
-  const mult = w.supernova ? 2 : 1, pts = n * (n + 1) / 2 * mult;
+  const n = hues.length, set = setBonus(hues);
+  const mult = (w.supernova ? 2 : 1) * set.mult * (1 + 0.25 * perk(w, c, 'greed'));
+  const pts = Math.round(tri(n) * mult);
   if (!c.rogue) { c.score += pts; w.teamScore += pts; c.banked += n; c.best = Math.max(c.best, n); }
-  ev(w, { type: 'bank', pid: c.pid, n, pts, mult, x: c.x, y: c.y, trail, rogue: c.rogue, linked });
+  ev(w, { type: 'bank', pid: c.pid, n, pts, mult: w.supernova ? 2 : 1, set: set.name, setMult: set.mult, hue: set.hue, x: c.x, y: c.y, trail, rogue: c.rogue, linked });
   if (isPvE(w) && !c.rogue && n >= CFG.LIFE_BANK_THRESHOLD && w.lives < CFG.MAX_LIVES) {
     w.lives++; ev(w, { type: 'life', x: c.x, y: c.y });
   }
@@ -660,13 +755,14 @@ function respawn(w, c) {
     if (s > bs) { bs = s; best = { x, y, vx: -Math.sin(a), vy: Math.cos(a) }; }
   }
   Object.assign(c, { x: best.x, y: best.y, vx: best.vx * CFG.START_SPEED, vy: best.vy * CFG.START_SPEED, speed: CFG.START_SPEED,
-    dead: false, inv: CFG.INVULN, latch: -1, freeT: 1, tail: [] });
+    dead: false, inv: CFG.INVULN, latch: -1, freeT: 1, tail: [], unstableT: 0 });
   ev(w, { type: 'spawn', pid: c.pid, x: c.x, y: c.y });
 }
 
 function rankings(w) {
   return w.comets.filter(c => !c.rogue).slice().sort((a, b) => b.score - a.score || b.banked - a.banked || b.cuts - a.cuts)
-    .map(c => ({ pid: c.pid, name: c.name, color: c.color, score: c.score, banked: c.banked, best: c.best, cuts: c.cuts, bot: c.bot }));
+    .map(c => ({ pid: c.pid, name: c.name, color: c.color, score: c.score, banked: c.banked, best: c.best, cuts: c.cuts, bot: c.bot,
+      pegs: w.anchors.filter(A => A.owner === c.pid).length, bounties: c.bounties }));
 }
 
 /** Advance the world by one fixed tick. inputs: { [pid]: held(boolean) } */
@@ -680,15 +776,29 @@ function stepWorld(w, inputs) {
     for (const c of w.comets) updateTail(c);
     return;
   }
+  if (w.phase === 'draft') { // everything is frozen until a perk is picked (pendingPick is set by the controller)
+    w.draftT += DT;
+    if (w.pendingPick != null) {
+      const id = w.draft[w.pendingPick] || w.draft[0];
+      w.pendingPick = null; w.draft = null; w.phase = 'play'; applyPerk(w, id);
+      for (const c of w.comets) if (!c.rogue && !c.dead) c.inv = Math.max(c.inv, 1);
+    }
+    return;
+  }
   const playing = w.phase === 'play';
   if (!playing) w.overT += DT;
+  let startDraft = false;
 
   // --- timers & escalation ---
   if (playing) {
     w.elapsed += DT;
     if (isPvE(w)) {
       const wave = 1 + Math.floor(w.elapsed / CFG.WAVE_SECONDS);
-      if (wave !== w.wave) { w.wave = wave; ev(w, { type: 'wave', n: wave }); syncRogues(w); }
+      if (wave !== w.wave) {
+        w.wave = wave; ev(w, { type: 'wave', n: wave }); syncRogues(w);
+        for (const c of w.comets) if (!c.rogue) c.plates = w.perks.plating || 0;
+        startDraft = !w.demo;
+      }
       w.drift = w.wave >= 4 ? Math.min(70, (w.wave - 3) * 18) : 0;
       if ((w.astT -= DT) <= 0) { w.astT = 1.3; if (w.asteroids.length < Math.min(w.wave + (w.wave > 2 ? 1 : 0), 12)) spawnAsteroidFromEdge(w); }
     } else {
@@ -698,10 +808,11 @@ function stepWorld(w, inputs) {
         if (w.asteroids.length < CFG.VS_ASTEROIDS_SUPERNOVA) spawnAsteroidPair(w);
       }
       if (w.timeLeft <= 0) {
-        if (w.demo) { w.timeLeft = CFG.MATCH_SECONDS; w.supernova = false; for (const c of w.comets) c.score = 0; }
+        if (w.demo) { w.timeLeft = CFG.MATCH_SECONDS; w.supernova = false; for (const c of w.comets) c.score = 0; for (const A of w.anchors) A.owner = -1; }
         else { w.timeLeft = 0; w.phase = 'over'; w.overT = 0; ev(w, { type: 'end' }); }
       }
     }
+    if ((w.unstT -= DT) <= 0) { w.unstT = CFG.UNSTABLE_EVERY; if (!w.dust.some(d => d.kind === 2 && d.life > 4.5) && w.rng() < 0.75) spawnUnstable(w); }
   }
 
   // --- comets ---
@@ -713,6 +824,21 @@ function stepWorld(w, inputs) {
     }
     const held = !playing ? false : c.ai ? botThink(w, c) : !!inputs[c.pid];
     stepComet(w, c, held, DT);
+    // versus: orbit a peg for CLAIM_TIME to paint it; orbiting your own peg drips +1 mote per lap
+    if (w.mode === 'vs' && playing && c.latch >= 0) {
+      const A = w.anchors[c.latch];
+      if (A.owner !== c.pid) {
+        if ((c.claimT += DT) >= CFG.CLAIM_TIME) { A.owner = c.pid; c.orbitAcc = 0; ev(w, { type: 'claim', pid: c.pid, a: c.latch, x: A.x, y: A.y }); }
+      } else while (c.orbitAcc >= TAU) {
+        c.orbitAcc -= TAU; const h = dominantHue(c.tail); growTail(c, 1, h >= 0 ? h : 0);
+        ev(w, { type: 'lap', pid: c.pid, x: c.x, y: c.y, n: c.tail.length });
+      }
+    }
+    // unstable motes fizzle out of your tail unless you bank them in time
+    if (c.unstableT > 0 && (c.unstableT -= DT) <= 0) {
+      const before = c.tail.length; c.tail = c.tail.filter(m => m.h !== 3);
+      if (before > c.tail.length) ev(w, { type: 'decay', pid: c.pid, x: c.x, y: c.y, n: before - c.tail.length });
+    }
     updateTail(c);
   }
 
@@ -727,6 +853,7 @@ function stepWorld(w, inputs) {
   for (let i = w.dust.length - 1; i >= 0; i--) {
     const d = w.dust[i];
     d.x += d.vx * DT; d.y += d.vy * DT; d.vx *= 0.985; d.vy *= 0.985;
+    if (Math.abs(d.vx) < 0.5) d.vx = 0; if (Math.abs(d.vy) < 0.5) d.vy = 0;
     if (d.x < 10 || d.x > CFG.W - 10) d.vx = -d.vx; if (d.y < 10 || d.y > CFG.H - 10) d.vy = -d.vy;
     d.x = clamp(d.x, 10, CFG.W - 10); d.y = clamp(d.y, 10, CFG.H - 10);
     if (d.delay > 0) d.delay -= DT;
@@ -735,17 +862,20 @@ function stepWorld(w, inputs) {
     if (d.delay > 0 || !playing) continue;
     for (const c of w.comets) {
       if (c.dead || c.tail.length >= CFG.TAIL_MAX || c.rogue) continue;
-      const dd = dist2(c.x, c.y, d.x, d.y);
-      if (dd < CFG.MAGNET_R * CFG.MAGNET_R && dd > 1) { // gentle magnet: easier pickups, still deterministic
-        const l = Math.sqrt(dd), k = CFG.MAGNET_PULL * (1 - l / CFG.MAGNET_R) * DT / l;
+      const dd = dist2(c.x, c.y, d.x, d.y), MR = CFG.MAGNET_R * (1 + 0.5 * perk(w, c, 'magnet'));
+      if (dd < MR * MR && dd > 1) { // gentle magnet: easier pickups, still deterministic
+        const l = Math.sqrt(dd), k = CFG.MAGNET_PULL * (1 - l / MR) * DT / l;
         d.x += (c.x - d.x) * Math.min(1, k); d.y += (c.y - d.y) * Math.min(1, k);
       }
     }
     for (const c of w.comets) {
       if (c.dead || c.tail.length >= CFG.TAIL_MAX) continue;
       if (dist2(c.x, c.y, d.x, d.y) < CFG.COLLECT_R * CFG.COLLECT_R) {
-        growTail(c, d.kind ? 3 : 1); w.dust.splice(i, 1);
-        ev(w, { type: 'collect', pid: c.pid, x: d.x, y: d.y, kind: d.kind, n: c.tail.length });
+        if (d.kind === 2) { growTail(c, CFG.UNSTABLE_VALUE, 3); c.unstableT = CFG.UNSTABLE_DECAY + 6 * perk(w, c, 'stable'); }
+        else if (d.kind === 1) { const h = dominantHue(c.tail); growTail(c, 3, h >= 0 ? h : d.id % 3); }
+        else growTail(c, 1, d.h);
+        w.dust.splice(i, 1);
+        ev(w, { type: 'collect', pid: c.pid, x: d.x, y: d.y, kind: d.kind, h: d.h, n: c.tail.length });
         break;
       }
     }
@@ -775,10 +905,9 @@ function stepWorld(w, inputs) {
   if (!playing) return;
 
   // --- the sun: bank in the corona, die in the core ---
-  const bankR = CFG.BANK_R * (w.supernova ? CFG.SUPERNOVA_BANK_MULT : 1);
   for (const c of w.comets) {
     if (c.dead) continue;
-    const d = dist2(c.x, c.y, CX, CY);
+    const d = dist2(c.x, c.y, CX, CY), bankR = CFG.BANK_R * (w.supernova ? CFG.SUPERNOVA_BANK_MULT : 1) * (1 + 0.15 * perk(w, c, 'corona'));
     if (d < (CFG.SUN_R + CFG.HEAD_R * 0.4) ** 2) { c.inv = 0; crash(w, c, 'sun'); }
     else if (d < bankR * bankR && c.tail.length > 0) bank(w, c);
   }
@@ -807,6 +936,17 @@ function stepWorld(w, inputs) {
       }
     }
   }
+
+  // --- versus: who is the leader (and therefore carries a bounty)? ---
+  if (w.mode === 'vs') {
+    let top = 0, lead = -1, tie = false;
+    for (const c of cs) { if (c.score > top) { top = c.score; lead = c.pid; tie = false; } else if (c.score === top && top > 0) tie = true; }
+    const nl = tie ? -1 : lead;
+    if (nl !== w.leader) { w.leader = nl; if (nl >= 0 && !w.demo) ev(w, { type: 'leader', pid: nl }); }
+  }
+
+  // --- solo / co-op: a new wave opens the perk draft ---
+  if (startDraft && w.phase === 'play') { w.phase = 'draft'; w.draft = draftOffers(w); w.draftT = 0; w.pendingPick = null; ev(w, { type: 'draft', wave: w.wave }); }
 }
 
 /** Solo: rogue comets join from wave 3 and hunt the player's tail. */
@@ -838,13 +978,14 @@ function rayDanger(w, c, hx, hy) {
 }
 function chooseTarget(w, c) {
   const ai = c.ai, n = c.tail.length, late = w.mode === 'vs' && w.timeLeft < 10;
-  if (n >= ai.greed || (late && n >= 3) || n >= CFG.TAIL_MAX - 2 || (w.supernova && n >= 5 && !ai.rogue)) { ai.tgt = { kind: 'bank' }; return; }
+  if (n >= ai.greed || (late && n >= 3) || n >= CFG.TAIL_MAX - 2 || (w.supernova && n >= 5 && !ai.rogue) || (c.unstableT > 0 && c.unstableT < 5)) { ai.tgt = { kind: 'bank' }; return; }
+  const myHue = dominantHue(c.tail);
   const hv = Math.hypot(c.vx, c.vy) || 1, hx = c.vx / hv, hy = c.vy / hv;
   let best = null, bs = 0;
   for (const d of w.dust) {
     if (d.delay > 0.15) continue;
     const dx = d.x - c.x, dy = d.y - c.y, dd = Math.hypot(dx, dy) || 1;
-    let s = (d.kind ? 3 : 1) / (dd + 80) * (1 + 0.7 * Math.max(0, (dx * hx + dy * hy) / dd));
+    let s = (d.kind === 2 ? 5 : d.kind ? 3 : d.h === myHue ? 1.6 : 1) / (dd + 80) * (1 + 0.7 * Math.max(0, (dx * hx + dy * hy) / dd));
     if (dist2(d.x, d.y, CX, CY) < (CFG.SUN_R + 60) ** 2) s *= 0.2;
     if (s > bs) { bs = s; best = { kind: 'dust', id: d.id }; }
   }
@@ -853,7 +994,7 @@ function chooseTarget(w, c) {
     if (e === c || e.dead || e.inv > 0 || e.tail.length < 4 || (ai.rogue && e.rogue) || teammates(w, c, e)) continue;
     for (let j = 0; j < e.tail.length; j += 3) {
       const m = e.tail[j], dd = Math.hypot(m.x - c.x, m.y - c.y);
-      const s = (e.tail.length - j) * 0.35 * aggro / (dd + 140);
+      const s = (e.tail.length - j) * 0.35 * aggro * (e.pid === w.leader ? 1.6 : 1) / (dd + 140);
       if (s > bs) { bs = s; best = { kind: 'mote', pid: e.pid, j }; }
     }
   }
@@ -913,14 +1054,16 @@ const FX = {
     const col = e.pid != null ? colorOf(e.pid) : '#fff', mine = e.pid != null && isLocal(e.pid);
     switch (e.type) {
       case 'collect':
-        this.burst(e.x, e.y, e.kind ? 16 : 7, e.kind ? '#ffd76a' : col, 40, e.kind ? 220 : 120, 0.45, 3);
+        this.burst(e.x, e.y, e.kind ? 16 : 7, e.kind === 2 ? UNSTABLE_COLOR : e.kind ? '#ffe6fb' : hueColor(e.h), 40, e.kind ? 220 : 120, 0.45, 3);
+        if (e.kind === 2 && mine) { this.text(e.x, e.y - 24, '+5 UNSTABLE — bank fast!', UNSTABLE_COLOR, 18, 1.4); SND.alarm(); }
         if (mine) SND.collect(e.n, e.kind);
         break;
       case 'bank': {
         for (let i = 0; i < e.trail.length; i += 2) this.parts.push({ x: e.trail[i], y: e.trail[i + 1], vx: 0, vy: 0, life: 0.5 + i * 0.006, max: 0.9, size: 5, color: col, seek: true, drag: 0 });
         this.ring(CX, CY, col, CFG.BANK_R * 0.6, CFG.BANK_R * (1.6 + e.n * 0.03), 0.7, 6);
         this.burst(CX, CY, 12 + e.n * 2, '#fff2c0', 100, 300 + e.n * 8, 0.8, 4);
-        if (!e.rogue) this.text(CX, CY - CFG.BANK_R - 10, (e.linked ? '⛓ TRAIN ' : '') + '+' + e.pts + (e.mult > 1 ? ' ×2' : ''), e.linked ? '#8dff6a' : col, 30 + Math.min(36, e.n * 1.1), 1.5);
+        if (!e.rogue) this.text(CX, CY - CFG.BANK_R - 10, (e.linked ? '⛓ TRAIN ' : '') + '+' + e.pts.toLocaleString() + (e.mult > 1 ? ' ×2' : ''), e.linked ? '#8dff6a' : col, 30 + Math.min(36, e.n * 1.1), 1.5);
+        if (!e.rogue && e.set) { this.text(CX, CY - CFG.BANK_R - 58, e.set + ' ×' + e.setMult, hueColor(e.hue), 24, 1.7); SND.life(); }
         this.kick(3 + Math.min(14, e.n * 0.5));
         if (e.n >= 15 && !e.rogue) { this.flash = 0.35; this.flashColor = col; }
         if (mine || !e.rogue) SND.bank(e.n);
@@ -929,7 +1072,8 @@ const FX = {
       case 'cut':
         this.burst(e.x, e.y, 14 + e.n, col, 80, 320, 0.55, 3.5);
         this.ring(e.x, e.y, '#ffffff', 6, 60, 0.35, 2);
-        this.text(e.x, e.y - 20, (e.by >= 0 ? 'SLICED ' : 'SNAP ') + '−' + e.n, col, 20, 1);
+        this.text(e.x, e.y - 20, (e.plated ? 'PLATED ' : e.by >= 0 ? 'SLICED ' : 'SNAP ') + '−' + e.n, col, 20, 1);
+        if (e.bounty) { this.text(e.x, e.y - 50, '👑 BOUNTY +' + e.bounty, '#ffd76a', 26, 1.6); this.flash = 0.25; this.flashColor = '#ffd76a'; }
         this.kick(e.by >= 0 ? 7 : 4); SND.cut();
         break;
       case 'crash':
@@ -949,6 +1093,13 @@ const FX = {
       case 'wave': this.say('WAVE ' + e.n, e.n === 3 ? 'rogue comets incoming' : e.n === 4 ? 'the stars begin to drift' : 'more rocks', '#a98bff'); SND.wave(); break;
       case 'supernova': this.say('SUPERNOVA', 'corona grows · banks pay ×2', '#ff9a3d', 2.6); SND.alarm(); this.flash = 0.4; this.flashColor = '#ffb347'; this.kick(10); break;
       case 'life': this.text(e.x, e.y - 30, '+1 HULL', '#8dff6a', 24, 1.4); SND.life(); break;
+      case 'claim': this.ring(e.x, e.y, col, 8, 60, 0.5, 4); this.burst(e.x, e.y, 14, col, 60, 200, 0.5, 3); if (mine) { this.text(e.x, e.y - 34, 'PEG CLAIMED', col, 16, 1); SND.latch(); SND.count(true); } break;
+      case 'lap': this.burst(e.x, e.y, 5, col, 30, 90, 0.35, 2.5); if (mine) { this.text(e.x, e.y - 26, '+1', col, 16, 0.7); SND.collect(e.n, 0); } break;
+      case 'decay': this.burst(e.x, e.y, 18, UNSTABLE_COLOR, 40, 160, 0.6, 3); this.text(e.x, e.y - 26, 'DECAYED −' + e.n, UNSTABLE_COLOR, 18, 1.2); if (mine) SND.overheat(); break;
+      case 'unstable': this.ring(e.x, e.y, UNSTABLE_COLOR, 70, 10, 0.6, 3); break;
+      case 'leader': this.text(CX, CY + CFG.BANK_R + 40, '👑 bounty on ' + (nameOf ? nameOf(e.pid) : 'the leader'), col, 18, 1.6); break;
+      case 'draft': SND.wave(); break;
+      case 'perk': { const P = PERKS[e.id]; if (P) this.say(P.icon + ' ' + P.name.toUpperCase(), P.desc, '#8dff6a', 2); SND.life(); break; }
       case 'over': case 'end': this.kick(6); break;
     }
   },
@@ -1073,7 +1224,7 @@ const Render = {
       this.label(g, tx.str, p.x, p.y - k * 40, tx.size * sc * Math.max(0.6, this.s * 1.4), tx.color, 900);
     }
     g.globalAlpha = 1;
-    for (const c of v.comets) this.drawNameTag(g, v, c, o);
+    for (const c of v.comets) { this.drawNameTag(g, v, c, o); this.drawUnstable(g, c, o); }
     for (const a of this.aimLabels) { const p = this.toScreen(a.x, a.y); this.label(g, 'HOLD = SWING', p.x, p.y - 34, 12, a.color, 900); }
     if (o.ghost && !o.ghost.dead) { const p = this.toScreen(o.ghost.x, o.ghost.y); g.globalAlpha = 0.6; this.label(g, 'BEST', p.x, p.y - 24, 11, '#ffffff', 800); g.globalAlpha = 1; }
     for (const a of v.asteroids) if (!a.inside) this.drawRockWarning(g, a, t);
@@ -1116,11 +1267,16 @@ const Render = {
       const hot = A.heat, col = hot > 0.6 ? '#ff6a3d' : '#3fe6ff', r = 34 + Math.sin(t * 3 + i) * 3;
       g.globalAlpha = 0.55; g.drawImage(this.glow(col), -r, -r, r * 2, r * 2); g.globalAlpha = 1;
       g.fillStyle = 'rgba(6,20,40,.9)'; g.beginPath(); g.arc(0, 0, 15, 0, TAU); g.fill();
-      g.strokeStyle = hot > 0.6 ? '#ff9a6a' : '#7ff4ff'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, 15, 0, TAU); g.stroke();
+      const own = A.owner >= 0 && v.comets.find(c => c.pid === A.owner);
+      g.strokeStyle = hot > 0.6 ? '#ff9a6a' : own ? own.color : '#7ff4ff'; g.lineWidth = own ? 6 : 4; g.beginPath(); g.arc(0, 0, 15, 0, TAU); g.stroke();
+      if (own) { g.fillStyle = own.color; for (let q = 0; q < 3; q++) { const a = t * 1.5 + q * TAU / 3; g.beginPath(); g.arc(Math.cos(a) * 27, Math.sin(a) * 27, 3, 0, TAU); g.fill(); } }
       g.lineWidth = 2.5; g.beginPath(); g.moveTo(-7, 0); g.lineTo(7, 0); g.moveTo(0, -7); g.lineTo(0, 7); g.stroke();
       if (hot > 0.01) {
         g.strokeStyle = `rgb(255,${200 - hot * 150 | 0},${120 - hot * 90 | 0})`; g.lineWidth = 4;
         g.beginPath(); g.arc(0, 0, 22, -Math.PI / 2, -Math.PI / 2 + hot * TAU); g.stroke();
+      }
+      if (v.mode === 'vs') for (const c of v.comets) if (c.latch === i && A.owner !== c.pid && c.claimT > 0) { // claim progress
+        g.strokeStyle = c.color; g.lineWidth = 4; g.globalAlpha = 0.9; g.beginPath(); g.arc(0, 0, 32, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(c.claimT / CFG.CLAIM_TIME, 0, 1)); g.stroke(); g.globalAlpha = 1;
       }
       if (aims[i]) aims[i].forEach((c2, k) => { // the peg you'd grab if you held right now
         g.save(); g.rotate(t * 2 + k); g.strokeStyle = c2; g.globalAlpha = 0.9; g.lineWidth = 3;
@@ -1136,11 +1292,15 @@ const Render = {
   drawDust(g, v, t) {
     for (const dd of v.dust) {
       if (dd.life && dd.life < 1.6 && Math.sin(t * 22) > 0) continue;
-      const prism = dd.kind === 1, tw = 0.8 + 0.2 * Math.sin(t * 6 + dd.id), r = prism ? 30 : 18;
-      g.globalAlpha = tw; g.drawImage(this.glow(prism ? '#ff7ae6' : '#ffc84a'), dd.x - r, dd.y - r, r * 2, r * 2);
+      const prism = dd.kind === 1, unst = dd.kind === 2, tw = unst ? 0.6 + 0.4 * Math.sin(t * 18 + dd.id) : 0.8 + 0.2 * Math.sin(t * 6 + dd.id), r = prism ? 30 : unst ? 34 : 18;
+      g.globalAlpha = tw; g.drawImage(this.glow(prism ? '#ff7ae6' : hueColor(dd.h)), dd.x - r, dd.y - r, r * 2, r * 2);
+      if (unst) { // worth 5, decays: draw a countdown ring
+        g.globalAlpha = 0.9; g.strokeStyle = UNSTABLE_COLOR; g.lineWidth = 3; g.beginPath();
+        g.arc(dd.x, dd.y, 20, -Math.PI / 2, -Math.PI / 2 + TAU * clamp((dd.life || 0) / CFG.UNSTABLE_LIFE, 0, 1)); g.stroke();
+      }
       g.save(); g.translate(dd.x, dd.y); g.rotate(t * (prism ? 1.2 : 0.6) + dd.id);
-      const k = (prism ? 10 : 6.5) * (0.85 + 0.15 * Math.sin(t * 8 + dd.id));
-      g.fillStyle = prism ? '#ffe6fb' : '#fff2c2'; g.beginPath(); // 4-point sparkle
+      const k = (prism ? 10 : unst ? 11 : 6.5) * (0.85 + 0.15 * Math.sin(t * 8 + dd.id));
+      g.fillStyle = prism ? '#ffe6fb' : unst ? '#ffd0d6' : '#fff6e0'; g.beginPath(); // 4-point sparkle
       for (let q = 0; q < 8; q++) { const a = q * Math.PI / 4, rr = q % 2 ? k * 0.28 : k; q ? g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : g.moveTo(rr, 0); }
       g.closePath(); g.fill();
       if (prism) { g.strokeStyle = '#ff9af0'; g.lineWidth = 2; g.beginPath(); for (let q = 0; q <= 6; q++) { const a = q * TAU / 6; q ? g.lineTo(Math.cos(a) * 15, Math.sin(a) * 15) : g.moveTo(15, 0); } g.stroke(); }
@@ -1218,10 +1378,10 @@ const Render = {
     if (n) {
       g.globalAlpha = 0.3 * blink; g.strokeStyle = col; g.lineWidth = 3; g.beginPath(); g.moveTo(c.x, c.y);
       for (const m of c.tail) g.lineTo(m.x, m.y); g.stroke();
-      const gl = this.glow(col);
       for (let i = n - 1; i >= 0; i--) {
         const m = c.tail[i], k = 1 - i / (n + 4), r = 11 + k * 11 + Math.sin(t * 8 - i * 0.5) * 1.5;
-        g.globalAlpha = (0.55 + 0.45 * k) * blink; g.drawImage(gl, m.x - r, m.y - r, r * 2, r * 2);
+        const flick = m.h === 3 ? 0.55 + 0.45 * Math.sin(t * 25 + i) : 1; // unstable motes flicker
+        g.globalAlpha = (0.55 + 0.45 * k) * blink * flick; g.drawImage(this.glow(m.h != null && m.h >= 0 ? hueColor(m.h) : col), m.x - r, m.y - r, r * 2, r * 2);
       }
     }
     // speed streak
@@ -1247,16 +1407,27 @@ const Render = {
     if (c.dead) return;
     const p = this.toScreen(c.x, c.y), n = c.tail.length, mine = o.localPids.has(c.pid);
     if ((o.hud === 'vs' || o.hud === 'coop') && !c.rogue) {
-      g.globalAlpha = 0.85; this.label(g, (o.labels && o.labels[c.pid] && v.elapsed < 6 ? '[' + o.labels[c.pid] + '] ' : '') + c.name, p.x, p.y - 26, 12, c.color, 800); g.globalAlpha = 1;
+      const crown = v.mode === 'vs' && v.leader === c.pid;
+      g.globalAlpha = 0.9; this.label(g, (crown ? '👑 ' : '') + (o.labels && o.labels[c.pid] && v.elapsed < 6 ? '[' + o.labels[c.pid] + '] ' : '') + c.name + (crown ? ' · BOUNTY' : ''), p.x, p.y - 26, crown ? 14 : 12, crown ? '#ffd76a' : c.color, 800); g.globalAlpha = 1;
     } else if (o.hud === 'solo' && mine && v.elapsed < 9 && v.phase === 'play' && !this.aimLabels.length) {
       this.label(g, 'HOLD to swing · RELEASE to fling', p.x, p.y - 30, 13, '#ffffff', 700);
     }
     if (mine && n >= 2 && o.hud !== 'none') {
-      let tn = n, linked = false; // co-op: preview the combined train value
-      if (v.mode === 'coop') for (const m of v.comets) if (m !== c && !m.rogue && !m.dead && dist2(m.x, m.y, c.x, c.y) < CFG.COOP_LINK_R ** 2) { tn += m.tail.length; linked = true; }
-      const pts = tn * (tn + 1) / 2 * (v.supernova ? 2 : 1);
-      g.globalAlpha = 0.95; this.label(g, (linked ? '⛓ ' + tn : n) + ' · +' + pts, p.x, p.y + 32, 15 + Math.min(9, tn * 0.2), tn >= 20 ? '#ffd76a' : '#ffffff', 900); g.globalAlpha = 1;
+      let hues = c.tail.map(m => m.h), linked = false; // co-op: preview the combined train value
+      if (v.mode === 'coop') for (const m of v.comets) if (m !== c && !m.rogue && !m.dead && dist2(m.x, m.y, c.x, c.y) < CFG.COOP_LINK_R ** 2) { hues = hues.concat(m.tail.map(q => q.h)); linked = true; }
+      const tn = hues.length, set = setBonus(hues), greed = 1 + 0.25 * ((v.perks && v.perks.greed) || 0);
+      const pts = Math.round(tn * (tn + 1) / 2 * (v.supernova ? 2 : 1) * set.mult * (v.mode === 'vs' ? 1 : greed));
+      g.globalAlpha = 0.95; this.label(g, (linked ? '⛓ ' + tn : n) + ' · +' + pts.toLocaleString(), p.x, p.y + 32, 15 + Math.min(9, tn * 0.2), tn >= 20 ? '#ffd76a' : '#ffffff', 900);
+      if (set.name) this.label(g, set.name + ' ×' + set.mult, p.x, p.y + 52, 12, hueColor(set.hue), 900);
+      else { const k = hueCounts(hues), col = k[0] + k[1] + k[2], top = Math.max(...k); if (col >= 3) this.label(g, DUST_HUE_NAMES[k.indexOf(top)] + ' ' + Math.round(top / col * 100) + '%', p.x, p.y + 52, 11, hueColor(k.indexOf(top)), 800); }
+      g.globalAlpha = 1;
     }
+  },
+
+  drawUnstable(g, c, o) {
+    if (c.dead || !(c.unstableT > 0) || !o.localPids.has(c.pid)) return;
+    const p = this.toScreen(c.x, c.y);
+    this.label(g, '⚠ ' + c.unstableT.toFixed(1) + 's', p.x, p.y - 46, 15, UNSTABLE_COLOR, 900);
   },
 
   drawRockWarning(g, a, t) {
@@ -1280,6 +1451,8 @@ const Render = {
       else v.comets.filter(c => !c.rogue).forEach((c, i) => this.label(g, c.name.slice(0, 8) + ' ' + c.score.toLocaleString(), 20 + i * (narrow ? 84 : 120), top + 34, 13, c.color, 800, 'left'));
       this.label(g, 'WAVE ' + v.wave, W / 2, narrow ? top + 64 : top, narrow ? 20 : 28, '#a98bff', 900);
       if (o.daily) this.label(g, 'DAILY CONSTELLATION', W / 2, narrow ? top + 86 : top + 28, 11, '#8c93c4', 800);
+      const pk = Object.entries(v.perks || {}).map(([id, k]) => PERKS[id] ? PERKS[id].icon + (k > 1 ? '×' + k : '') : '').join(' ');
+      if (pk) this.label(g, pk, narrow ? 18 : 20, top + (narrow ? 94 : 58), 16, '#ffffff', 700, 'left');
       const maxL = coop ? Math.max(CFG.COOP_LIVES, v.lives) : CFG.MAX_LIVES;
       for (let i = 0; i < maxL; i++) {
         const x = narrow ? W - 30 - i * 26 : W - 130 - i * 30, y = narrow ? top + 64 : top, on = i < v.lives;
@@ -1289,13 +1462,13 @@ const Render = {
       g.globalAlpha = 1;
     } else if (o.hud === 'vs') {
       const list = v.comets.filter(c => !c.rogue), half = Math.ceil(list.length / 2);
-      const wEach = narrow ? 80 : Math.min(190, (W / 2 - 220) / Math.max(1, half));
+      const wEach = narrow ? Math.min(110, (W - 130) / Math.max(1, list.length)) : Math.min(190, (W / 2 - 220) / Math.max(1, half));
       const lead = list.reduce((m, c) => Math.max(m, c.score), 0);
       list.forEach((c, i) => {
         // wide: split the roster left/right of the timer; narrow (phones): compact chips in one row
         const x = narrow ? 12 + i * wEach : i < half ? 16 + i * wEach : W - 130 - (list.length - i) * wEach;
         g.fillStyle = c.color; g.beginPath(); g.arc(x + 9, top, 8, 0, TAU); g.fill();
-        if (narrow) { this.label(g, c.score.toLocaleString() + (c.score === lead && lead > 0 ? '★' : ''), x + 21, top, 22, c.color, 900, 'left'); return; }
+        if (narrow) { this.label(g, c.score.toLocaleString(), x + 20, top, wEach < 80 ? 16 : 21, c.color, 900, 'left'); return; }
         this.label(g, c.name.slice(0, 11) + (c.score === lead && lead > 0 ? ' ★' : ''), x + 23, top - 13, 14, c.color, 800, 'left');
         this.label(g, c.score.toLocaleString(), x + 23, top + 11, 30, '#fff', 900, 'left');
       });
@@ -1488,17 +1661,18 @@ class Peer {
 function encodeSnapshot(w, ack) {
   return JSON.stringify({
     t: 's', k: w.tick, ph: w.phase, cd: r3(w.countdown), tl: r1(w.timeLeft), sn: w.supernova ? 1 : 0, el: r1(w.elapsed), ly: w.layout, ack,
-    md: w.mode, lv: w.lives, wv: w.wave, ts: w.teamScore,
+    md: w.mode, lv: w.lives, wv: w.wave, ts: w.teamScore, ld: w.leader, pk: w.perks, dr: w.draft, dt: r1(w.draftT),
     c: w.comets.map(c => [c.pid, r1(c.x), r1(c.y), r1(c.vx), r1(c.vy), c.latch, c.tail.length, c.dead ? 1 : 0, c.inv > 0 ? r1(c.inv) : 0,
-      c.score, r3(c.ang), r1(c.orbitR), c.dir, r1(c.speed), Math.min(9, r1(c.freeT)), c.held ? 1 : 0, c.rogue ? 1 : 0]),
-    a: w.anchors.map(A => [r1(A.x), r1(A.y), Math.round(A.heat * 100) / 100, A.off ? 1 : 0]),
-    d: w.dust.map(d => [d.id, Math.round(d.x), Math.round(d.y), d.kind, d.life ? Math.round(d.life * 10) / 10 : 0]),
+      c.score, r3(c.ang), r1(c.orbitR), c.dir, r1(c.speed), Math.min(9, r1(c.freeT)), c.held ? 1 : 0, c.rogue ? 1 : 0,
+      c.tail.map(m => m.h < 0 ? 0 : m.h).join(''), r1(c.unstableT), r1(c.claimT)]),
+    a: w.anchors.map(A => [r1(A.x), r1(A.y), Math.round(A.heat * 100) / 100, A.off ? 1 : 0, A.owner]),
+    d: w.dust.map(d => [d.id, Math.round(d.x), Math.round(d.y), d.kind, d.life ? Math.round(d.life * 10) / 10 : 0, d.h]),
     r: w.asteroids.map(a => [a.id, Math.round(a.x), Math.round(a.y), Math.round(a.r), r3(a.rot), a.inside ? 1 : 0]),
   });
 }
 function decodeComet(a) {
   return { pid: a[0], x: a[1], y: a[2], vx: a[3], vy: a[4], latch: a[5], tailN: a[6], dead: !!a[7], inv: a[8], score: a[9],
-    ang: a[10], orbitR: a[11], dir: a[12], speed: a[13], freeT: a[14], held: !!a[15], rogue: !!a[16] };
+    ang: a[10], orbitR: a[11], dir: a[12], speed: a[13], freeT: a[14], held: !!a[15], rogue: !!a[16], hues: a[17] || '', unstableT: a[18] || 0, claimT: a[19] || 0 };
 }
 
 // ============================== 9. GAME CONTROLLER ==============================
@@ -1530,13 +1704,13 @@ const Game = {
   },
   startSolo(daily = false) {
     this.mode = 'solo'; this.paused = false; this.resultsShown = false; FX.reset();
-    this.daily = daily; this.rec = []; this.ghost = null;
+    this.daily = daily; this.rec = []; this.picks = []; this.ghost = null;
     const opts = { mode: 'solo', players: [{ pid: 0, name: Store.data.name || 'You', color: PCOLORS[0] }], seed: daily ? Daily.seed(Daily.key()) : (Math.random() * 1e9) | 0 };
     this.world = createWorld(opts);
     const best = daily && Daily.best();
     if (best && best.inputs) {
       // the ghost is a second, independent world fed the recorded inputs; the sim is deterministic per seed
-      this.ghost = { world: createWorld(opts), bits: Daily.decode(best.inputs), i: 0 };
+      this.ghost = { world: createWorld(opts), bits: Daily.decode(best.inputs), picks: best.picks || [], i: 0 };
     }
     this.localPids = new Set([0]); this.labels = {};
     this.enterPlay();
@@ -1563,7 +1737,10 @@ const Game = {
       inputs[0] = Input.held('any');
       if (this.daily && w.phase !== 'over') this.rec.push(inputs[0] ? 1 : 0);
       const G = this.ghost;
-      if (G && G.i < G.bits.length) { stepWorld(G.world, { 0: !!G.bits[G.i++] }); G.world.events.length = 0; }
+      if (G && G.i < G.bits.length) {
+        const pk = G.picks.find(q => q[0] === G.i); if (pk) G.world.pendingPick = pk[1]; // replay the ghost's perk choices on the same tick
+        stepWorld(G.world, { 0: !!G.bits[G.i++] }); G.world.events.length = 0;
+      }
     }
     else if (this.mode === 'local') this.localPlayers.forEach((p, i) => { if (!p.bot) inputs[i] = Input.held(p.dev); });
     else if (this.mode === 'host') {
@@ -1572,14 +1749,19 @@ const Game = {
       while (this.hostQueue.length > this.hostDelay + 1) this.hostQueue.shift();
       inputs[Lobby.myPid] = this.hostQueue[0];
       for (const r of Lobby.roster) if (r.peer) inputs[r.pid] = r.held;
+      if (w.phase === 'draft' && w.pendingPick == null && w.draftT > CFG.DRAFT_TIMEOUT_ONLINE) w.pendingPick = 0; // nobody chose
     }
     stepWorld(w, inputs);
     if (w.events.length) {
-      if (this.mode !== 'menu') for (const e of w.events) FX.handle(e, pid => this.colorOf(pid), pid => this.localPids.has(pid));
+      if (this.mode !== 'menu') for (const e of w.events) FX.handle(e, pid => this.colorOf(pid), pid => this.localPids.has(pid), pid => this.nameOf(pid));
       if (this.mode === 'host') for (const e of w.events) this.outEvents.push(e);
       w.events.length = 0;
     }
     if (this.mode === 'host' && w.tick % CFG.SNAPSHOT_EVERY === 0) Lobby.broadcastState(w);
+  },
+  nameOf(pid) {
+    const v = this.mode === 'guest' ? Guest.view : this.world;
+    const c = v && v.comets.find(c => c.pid === pid); return c ? c.name : '?';
   },
   colorOf(pid) {
     const v = this.mode === 'guest' ? Guest.view : this.world;
@@ -1604,10 +1786,16 @@ const Game = {
     const ping = this.mode === 'guest' ? Guest.ping() : this.mode === 'host' ? Lobby.ping() : null;
     const G = this.ghost, ghost = G && G.i < G.bits.length && G.world.comets[0];
     const db = Daily.best();
-    Render.draw(view, { localPids: this.localPids, labels: this.labels, hud, time: this.time, ping, dim: this.mode === 'menu' || this.paused,
+    Render.draw(view, { localPids: this.localPids, labels: this.labels, hud, time: this.time, ping, dim: this.mode === 'menu' || this.paused || (view && view.phase === 'draft'),
       daily: this.daily, dailyBest: db ? db.score : 0, ghost: ghost || null });
     // music intensity follows the action
     if (view) SND.intensity = view.mode !== 'vs' ? clamp((view.wave - 1) / 6, 0, 1) : view.supernova ? 1 : clamp(view.elapsed / CFG.MATCH_SECONDS, 0, 0.7);
+    // perk draft overlay follows the world's phase
+    if (view && this.mode !== 'menu') {
+      if (view.phase === 'draft' && view.draft && UI.current == null) UI.showDraft(view.draft, view.wave, view);
+      else if (view.phase !== 'draft' && UI.current === 's-draft') UI.show(null);
+      if (UI.current === 's-draft' && (this.mode === 'host' || this.mode === 'guest')) $('draft-timer').textContent = 'Auto-pick in ' + Math.max(0, Math.ceil(CFG.DRAFT_TIMEOUT_ONLINE - (view.draftT || 0))) + ' s · any teammate can choose';
+    }
     // end-of-round
     if (view && view.phase === 'over' && this.mode !== 'menu' && !this.resultsShown && (view.overT || 0) > 1.3) this.finish(view);
   },
@@ -1619,7 +1807,7 @@ const Game = {
       const me = v.comets.find(c => c.pid === 0), score = me ? me.score : 0;
       if (this.daily) {
         const prev = Daily.best(), isBest = !prev || score > prev.score;
-        if (isBest) { Store.data.daily = { key: Daily.key(), score, wave: v.wave, inputs: Daily.encode(this.rec) }; Store.save(); }
+        if (isBest) { Store.data.daily = { key: Daily.key(), score, wave: v.wave, inputs: Daily.encode(this.rec), picks: this.picks }; Store.save(); }
         UI.results({ solo: true, daily: true, score, wave: v.wave, best: me ? me.best : 0, isBest, prev: prev ? prev.score : 0 });
       } else {
         const isBest = Store.submitSolo(score, v.wave);
@@ -1633,8 +1821,15 @@ const Game = {
     // guests get results via a 'results' message
   },
 
+  /** Choose perk i in the current draft (any local player, or a guest via the network). */
+  pick(i) {
+    if (this.mode === 'guest') { Lobby.host && Lobby.host.send({ t: 'pick', c: i }); UI.show(null); return; }
+    const w = this.world; if (!w || w.phase !== 'draft' || w.pendingPick != null) return;
+    w.pendingPick = i; if (this.daily) this.picks.push([this.rec.length, i]);
+    UI.show(null);
+  },
   togglePause() {
-    if (this.mode === 'menu' || this.resultsShown) return;
+    if (this.mode === 'menu' || this.resultsShown || UI.current === 's-draft') return;
     if (this.mode === 'host' || this.mode === 'guest') {
       // online play never freezes: the overlay is just a menu
       if (UI.current === 's-pause') UI.show(null); else UI.showPause(true);
@@ -1675,7 +1870,8 @@ const Guest = {
     if (!s) { this.pred = null; return; }
     const old = this.pred && !this.pred.dead ? { x: this.pred.x, y: this.pred.y } : null;
     this.pred = Object.assign({ pid: this.myPid, tail: [] }, s);
-    this.predWorld.anchors = m.a.map(A => ({ x: A[0], y: A[1], heat: A[2], off: !!A[3], users: 0 }));
+    this.predWorld.anchors = m.a.map(A => ({ x: A[0], y: A[1], heat: A[2], off: !!A[3], users: 0, owner: A[4] == null ? -1 : A[4] }));
+    this.predWorld.perks = m.pk || {};
     if (!s.dead && m.ph === 'play') for (const p of this.pending) stepComet(this.predWorld, this.pred, p.held, DT);
     this.predWorld.events.length = 0;
     if (old && !this.pred.dead) {
@@ -1686,7 +1882,7 @@ const Guest = {
   onEvents(list) {
     for (const e of list) {
       if (e.pid === this.myPid && (e.type === 'latch' || e.type === 'release' || e.type === 'wall')) continue; // already predicted
-      FX.handle(e, pid => Game.colorOf(pid), pid => pid === this.myPid);
+      FX.handle(e, pid => Game.colorOf(pid), pid => pid === this.myPid, pid => Game.nameOf(pid));
     }
   },
   frame(dt, now) {
@@ -1718,12 +1914,13 @@ const Guest = {
     const v = {
       mode: M.md || 'vs', phase: M.ph, countdown: M.cd, timeLeft: M.tl, supernova: !!M.sn, elapsed: M.el, layout: M.ly, wave: M.wv || 1, lives: M.lv || 0, teamScore: M.ts || 0,
       overT: this.overT || 0,
-      anchors: M.a.map(A => ({ x: A[0], y: A[1], heat: A[2], off: !!A[3] })),
+      anchors: M.a.map(A => ({ x: A[0], y: A[1], heat: A[2], off: !!A[3], owner: A[4] == null ? -1 : A[4] })),
+      leader: M.ld == null ? -1 : M.ld, perks: M.pk || {}, draft: M.dr || null, draftT: M.dt || 0,
       dust: [], asteroids: [], comets: [],
     };
     if (M.ph === 'over') this.overT = (this.overT || 0) + 1 / 60; else this.overT = 0;
     const da = new Map(a.m.d.map(d => [d[0], d]));
-    for (const d of b.m.d) { const p = da.get(d[0]) || d; v.dust.push({ id: d[0], x: lerp(p[1], d[1], t), y: lerp(p[2], d[2], t), kind: d[3], life: d[4] }); }
+    for (const d of b.m.d) { const p = da.get(d[0]) || d; v.dust.push({ id: d[0], x: lerp(p[1], d[1], t), y: lerp(p[2], d[2], t), kind: d[3], life: d[4], h: d[5] == null ? 0 : d[5] }); }
     const ra = new Map(a.m.r.map(r => [r[0], r]));
     for (const r of b.m.r) { const p = ra.get(r[0]) || r; v.asteroids.push({ id: r[0], x: lerp(p[1], r[1], t), y: lerp(p[2], r[2], t), r: r[3], rot: angLerp(p[4], r[4], t), inside: !!r[5] }); }
     for (const pid in b.comets) {
@@ -1739,12 +1936,13 @@ const Guest = {
         const jump = dist2(ca.x, ca.y, cb.x, cb.y) > 200 * 200;
         c = { x: jump ? cb.x : lerp(ca.x, cb.x, t), y: jump ? cb.y : lerp(ca.y, cb.y, t), vx: cb.vx, vy: cb.vy, latch: t < 0.5 ? ca.latch : cb.latch, speed: cb.speed, dead: cb.dead, held: cb.held };
       }
-      Object.assign(c, { pid: +pid, name: info.name, color: info.color, inv: cb.inv, score: cb.score, rogue: cb.rogue });
+      Object.assign(c, { pid: +pid, name: info.name, color: info.color, inv: cb.inv, score: cb.score, rogue: cb.rogue, unstableT: cb.unstableT, claimT: cb.claimT });
       // tails are rebuilt locally from head motion + authoritative length
       let tl = this.tails[pid] || (this.tails[pid] = []);
       if (c.dead) tl.length = 0;
       while (tl.length > cb.tailN) tl.pop();
       while (tl.length < cb.tailN) { const l = tl.length ? tl[tl.length - 1] : c; tl.push({ x: l.x, y: l.y }); }
+      for (let i = 0; i < tl.length; i++) tl[i].h = +(cb.hues[i] || 0); // set colors come from the host
       c.tail = tl; updateTail(c);
       v.comets.push(c);
     }
@@ -1826,6 +2024,7 @@ const Lobby = {
     }
     if (!r) return;
     if (m.t === 'i') { if (m.s > r.lastSeq) { r.lastSeq = m.s; r.held = !!m.h; } }
+    else if (m.t === 'pick') { const w = Game.world; if (w && w.phase === 'draft' && w.pendingPick == null) { w.pendingPick = m.c | 0; if (UI.current === 's-draft') UI.show(null); } }
     else if (m.t === 'ready') { r.ready = !!m.v; this.syncRoster(); this.checkStart(); }
     else if (m.t === 'bye') peer.close('left the room');
   },
@@ -2091,12 +2290,29 @@ const UI = {
       $('res-sub').textContent = (r.coop ? 'comet train · reached wave ' + r.coop.wave + ' · ' : '') + (r.online ? 'online match' : 'local match');
       L.forEach((p, i) => {
         const d = document.createElement('div'); d.className = 'res' + (i === 0 && !tie && !r.coop ? ' win' : '');
-        d.innerHTML = `<span class="rk">${i + 1}</span><span class="slot" style="border:0;background:none;padding:0;margin:0"><span class="dot" style="color:${p.color}"></span></span><span class="nm" style="color:${p.color}">${p.name}<br><span style="font-size:11px;color:#8c93c4;font-weight:600">banked ${p.banked} · best tail ${p.best} · slices ${p.cuts}</span></span><span class="sc">${p.score.toLocaleString()}</span>`;
+        d.innerHTML = `<span class="rk">${i + 1}</span><span class="slot" style="border:0;background:none;padding:0;margin:0"><span class="dot" style="color:${p.color}"></span></span><span class="nm" style="color:${p.color}">${p.name}<br><span style="font-size:11px;color:#8c93c4;font-weight:600">banked ${p.banked} · best tail ${p.best} · slices ${p.cuts}${p.pegs != null ? ' · pegs ' + p.pegs : ''}${p.bounties ? ' · 👑' + p.bounties : ''}</span></span><span class="sc">${p.score.toLocaleString()}</span>`;
         list.appendChild(d);
       });
       $('btn-rematch').innerHTML = r.online ? 'Rematch <span class="sub">ready up for another round</span>' : 'Rematch <span class="sub">Space / Enter</span>';
     }
     this.show('s-results');
+  },
+  draftSel: 0,
+  showDraft(ids, wave, v) {
+    $('draft-title').textContent = 'Wave ' + (wave - 1) + ' cleared!';
+    const el = $('draft-cards'); el.innerHTML = ''; this.draftSel = 0;
+    ids.forEach((id, i) => {
+      const P = PERKS[id], have = (v.perks && v.perks[id]) || 0, b = document.createElement('button');
+      b.className = 'btn perk' + (i === 0 ? ' hl' : ''); b.dataset.act = 'pick'; b.dataset.i = i;
+      b.innerHTML = `<span class="pi">${P.icon}</span><span><span class="pn">${i + 1}. ${P.name}</span> <span class="pk">${have ? 'have ' + have + '/' + P.max : ''}</span><span class="pd">${P.desc}</span></span>`;
+      el.appendChild(b);
+    });
+    $('draft-timer').textContent = '';
+    this.show('s-draft');
+  },
+  moveDraft() {
+    const cards = [...document.querySelectorAll('#draft-cards .perk')]; if (!cards.length) return;
+    this.draftSel = (this.draftSel + 1) % cards.length; cards.forEach((c, i) => c.classList.toggle('hl', i === this.draftSel)); SND.ui();
   },
   toast(msg) {
     const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; $('toasts').appendChild(t);
@@ -2129,6 +2345,12 @@ function onPress(dev, e) {
   if (dev === 'k:Escape' || dev === 'k:KeyP' || dev.startsWith('gs:')) {
     if (inGame && (scr == null || scr === 's-pause')) return Game.togglePause();
     if (dev === 'k:Escape' && ['s-howto', 's-local', 's-online'].includes(scr)) return UI.show('s-title');
+  }
+  if (scr === 's-draft') {
+    if (/^k:Digit[123]$/.test(dev) || /^k:Numpad[123]$/.test(dev)) return Game.pick(+dev.slice(-1) - 1);
+    if (dev === 'k:Enter' || dev.startsWith('gs:')) return Game.pick(UI.draftSel);
+    if ((dev.startsWith('k:') && SOLO_KEYS.includes(dev.slice(2))) || dev.startsWith('g:')) return UI.moveDraft();
+    return;
   }
   if (scr === 's-local') {
     if (dev === 'k:Enter' || dev.startsWith('gs:')) return act('localstart');
@@ -2188,6 +2410,7 @@ function act(a) {
     case 'ready': Lobby.setReady(!Lobby.myReady); break;
     case 'leave': Game.toMenu(); break;
     case 'resume': Game.togglePause(); break;
+    case 'pick': Game.pick(+(arguments[1] || 0)); break;
     case 'quit': Game.toMenu(); break;
     case 'rematch':
       if (Game.mode === 'solo') Game.startSolo(Game.daily);
@@ -2202,7 +2425,7 @@ function act(a) {
 Render.init();
 Input.init($('game'));
 Input.onPress = onPress;
-document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) { e.preventDefault(); act(b.dataset.act); } });
+document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) { e.preventDefault(); act(b.dataset.act, b.dataset.i); } });
 $('btn-mute').addEventListener('click', () => { SND.init(); SND.setMuted(!SND.muted); });
 $('btn-pause').addEventListener('click', () => Game.togglePause());
 SND.setMuted(SND.muted);
