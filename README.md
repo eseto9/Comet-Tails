@@ -23,7 +23,7 @@ Open `index.html` in any modern desktop or mobile browser. You can also enable *
 |---|---|---|
 | **Color sets** | all | Stardust comes in gold, ember and nebula. A tail that is 75%+ one color (5+ motes) banks for **×1.5**, and 100% one color (8+) for **×2**. Prisms take your tail's main color. Your comet shows the live set % under it. |
 | **Unstable dust** | all | Flashing red, worth 5 motes, spawns near the corona or the edges. It decays out of your tail after 8 s unless you bank. |
-| **Perk draft** | solo, co-op | After every wave, pick 1 of 3 team upgrades: Magnet+, Heat Sink, Tail Plating, Greed, Slipstream, Repair, Solar Flare, Spin Up, Prismatic, Stabilizer. Choices replay exactly in the Daily ghost. |
+| **Perk draft** | solo, co-op | After every wave, pick 1 of 3 team upgrades: Magnet+, Heat Sink, Tail Plating, Greed, Long Reach, Repair, Solar Flare, Deflector, Prismatic, Stabilizer. Choices replay exactly in the Daily ghost. |
 | **Peg ownership** | versus | Orbit a peg for 1 s to paint it your color. Rivals overheat your pegs 2× faster, and each lap around your own peg adds +1 mote in your set color. |
 | **Bounty** | versus | The leader wears a 👑. Slicing their tail instantly pays you half of what that tail would have banked. |
 
@@ -43,7 +43,7 @@ Open `index.html` in any modern desktop or mobile browser. You can also enable *
 
 | Mode | Description |
 |---|---|
-| **Solo** | 3 hulls and escalating waves: asteroids, rogue comets that hunt your tail, drifting pegs. Bank a tail of 20+ to repair a hull. |
+| **Solo** | 3 hulls and escalating waves. Each wave has a visible objective (bank 8, 12, 16… stardust; every 5th wave: beat the boss). Clearing it opens the perk draft. Asteroids, rogue comets and drifting pegs ramp up as you go. Bank a tail of 20+ to repair a hull. |
 | **Daily Constellation** | The same seeded sky for everyone each day. Your best run today is saved as input data and replayed as a white **ghost** to race. |
 | **Local Versus** | 2–4 players on one device, with optional bots. A 2-minute match whose final 20 s is a **Supernova** (bigger corona, ×2 banks). |
 | **Local Co-op: Comet Train** | Team up against the waves with a shared hull pool and no friendly fire. Teammates joined by the dashed link beam bank **together as one tail**, so 10 + 10 pays 210 instead of 55 + 55. |

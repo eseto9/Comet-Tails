@@ -220,7 +220,7 @@ ul.rules li::before{content:"";position:absolute;left:0;top:.75em;width:6px;heig
       <li><b>Color sets</b>: 75%+ one color (5+ motes) banks ×1.5, a single color (8+) banks ×2.</li>
       <li><b>Unstable dust</b> (red) is worth 5 but decays out of your tail after 8 s.</li>
       <li><b>Map events</b> roll in every ~30 s: meteor showers, dust blooms, peg blackouts and solar flares.</li>
-      <li><b>Solo / co-op</b>: draft a perk after every wave. Every 5th wave is a <b>boss</b> — slice the Devourer's tail, or outlast the Singularity.</li>
+      <li><b>Solo / co-op waves</b>: each wave shows its objective at the top — bank the required stardust to clear it, then draft a perk. Every 5th wave is a <b>boss</b>: slice the Devourer's tail, or outlast the Singularity.</li>
       <li><b>Versus</b>: orbit a peg for 1 s to own it (rivals overheat it 2× faster; you earn +1 per lap). The leader carries a <b>bounty</b>. The final 20 s is a Supernova (×2).</li>
       <li><b>Co-op Comet Train</b>: linked teammates bank as one tail. Shared hulls, no friendly fire.</li>
     </ul>
@@ -406,9 +406,9 @@ const CFG = {
   COLLECT_R: 34,             // pickup radius around a comet head
   MAGNET_R: 100, MAGNET_PULL: 380, // stardust drifts toward nearby comets
   LATCH_RANGE: 400, MIN_ORBIT_R: 46, LATCH_COOLDOWN: 0.06,
-  MIN_SPEED: 250, MAX_SPEED: 920, START_SPEED: 320,
-  SPIN_ACCEL: 150,           // speed gained per second while orbiting
-  FREE_DRAG: 0.35,           // how fast speed bleeds back to MIN when free
+  MIN_SPEED: 250, MAX_SPEED: 620, START_SPEED: 300, // capped low enough to stay controllable
+  SPIN_ACCEL: 80,            // speed gained per second while orbiting
+  FREE_DRAG: 0.9,            // how fast speed settles back to MIN after letting go
   WALL_DAMP: 0.82,
   HEAT_RATE: 0.30,           // anchor heat per second per orbiting comet
   COOL_RATE: 0.22, OVERHEAT_TIME: 3.0,
@@ -417,7 +417,8 @@ const CFG = {
   INVULN: 2.0, RESPAWN_SOLO: 1.2, RESPAWN_VS: 1.4,
   // Solo
   SOLO_LIVES: 3, MAX_LIVES: 5, LIFE_BANK_THRESHOLD: 20,
-  WAVE_SECONDS: 25, COUNTDOWN_SOLO: 1.5,
+  WAVE_GOAL_BASE: 8, WAVE_GOAL_STEP: 4, WAVE_GOAL_MAX: 40, // stardust to bank to clear a wave
+  COUNTDOWN_SOLO: 1.5,
   // Versus
   MATCH_SECONDS: 120, SUPERNOVA_SECONDS: 20, COUNTDOWN_VS: 3,
   VS_ASTEROIDS: 2, VS_ASTEROIDS_SUPERNOVA: 4,
@@ -596,6 +597,9 @@ function ev(w, e) { w.events.push(e); }
 const isPvE = w => w.mode !== 'vs';                      // solo + co-op share waves, lives, rogues and perks
 const teammates = (w, a, b) => w.mode === 'coop' && !a.rogue && !b.rogue;
 const tri = n => n * (n + 1) / 2;                         // bank payout for a tail of n
+const isBossWave = w => w.wave % CFG.BOSS_EVERY === 0;
+/** Stardust the team must bank to clear the current (non-boss) wave. */
+const waveGoal = w => Math.min(CFG.WAVE_GOAL_MAX, CFG.WAVE_GOAL_BASE + CFG.WAVE_GOAL_STEP * (w.wave - 1));
 
 // ---------- Perks: drafted between waves in solo / co-op (team-wide, stackable) ----------
 const PERKS = {
@@ -603,10 +607,10 @@ const PERKS = {
   heatsink: { name: 'Heat Sink',    icon: 'heatsink', desc: 'Pegs heat up 35% slower for your team.', max: 2 },
   plating:  { name: 'Tail Plating', icon: 'plating', desc: 'Once per wave, a cut only takes your last 3 motes.', max: 3 },
   greed:    { name: 'Greed',        icon: 'greed', desc: 'Banks pay +25%… but you lose a hull now.', max: 3 },
-  slip:     { name: 'Slipstream',   icon: 'slip', desc: 'You keep your speed much longer after letting go.', max: 2 },
+  reach:    { name: 'Long Reach',   icon: 'reach', desc: 'Grab pegs from 30% farther away.', max: 2 },
   hull:     { name: 'Repair',       icon: 'hull', desc: '+1 hull right now.', max: 9 },
   corona:   { name: 'Solar Flare',  icon: 'corona', desc: 'Your corona is 15% bigger: easier banking.', max: 2 },
-  spin:     { name: 'Spin Up',      icon: 'spin', desc: 'Orbiting builds speed 50% faster.', max: 2 },
+  deflector:{ name: 'Deflector',    icon: 'deflector', desc: 'Once per wave, hitting a rock only breaks your tail instead of a hull.', max: 2 },
   prism:    { name: 'Prismatic',    icon: 'prism', desc: 'Prisms (worth 3) appear twice as often.', max: 2 },
   stable:   { name: 'Stabilizer',   icon: 'stable', desc: 'Unstable dust in your tail lasts 6 s longer.', max: 2 },
 };
@@ -623,6 +627,7 @@ function applyPerk(w, id) {
   if (id === 'hull') w.lives++;
   if (id === 'greed') w.lives = Math.max(1, w.lives - 1);
   if (id === 'plating') for (const c of w.comets) if (!c.rogue) c.plates = w.perks.plating;
+  if (id === 'deflector') for (const c of w.comets) if (!c.rogue) c.deflect = w.perks.deflector;
   ev(w, { type: 'perk', id });
 }
 
@@ -644,7 +649,7 @@ function createWorld(opts) {
     phase: 'countdown', countdown: opts.mode === 'solo' ? CFG.COUNTDOWN_SOLO : CFG.COUNTDOWN_VS,
     elapsed: 0, timeLeft: CFG.MATCH_SECONDS, supernova: false, wave: 1, lives: opts.mode === 'coop' ? CFG.COOP_LIVES : CFG.SOLO_LIVES, overT: 0, teamScore: 0,
     anchors: [], dust: [], asteroids: [], comets: [], events: [], dustT: 0, astT: 2, drift: 0,
-    perks: {}, draft: null, draftT: 0, pendingPick: null, leader: -1, unstT: CFG.UNSTABLE_EVERY * 0.6,
+    perks: {}, waveBanked: 0, draft: null, draftT: 0, pendingPick: null, leader: -1, unstT: CFG.UNSTABLE_EVERY * 0.6,
     evT: CFG.EVENT_EVERY * 0.75, mev: null, flare: 0, hole: null, bossName: '',
     layout: opts.layout != null ? opts.layout : Math.floor(mulberry32(seed + 7)() * LAYOUTS.length),
   };
@@ -667,7 +672,7 @@ function addComet(w, p, slot, n) {
     x: pose.x, y: pose.y, vx: pose.vx * CFG.START_SPEED, vy: pose.vy * CFG.START_SPEED, speed: CFG.START_SPEED,
     latch: -1, ang: 0, orbitR: 0, dir: 1, freeT: 1, held: false, tail: [],
     dead: false, respawnT: 0, inv: 1, score: 0, banked: 0, best: 0, cuts: 0,
-    plates: 0, unstableT: 0, claimT: 0, orbitAcc: 0, bounties: 0, nearT: 0, nears: 0, boss: !!p.boss, hp: p.hp || 0,
+    plates: 0, deflect: 0, unstableT: 0, claimT: 0, orbitAcc: 0, bounties: 0, nearT: 0, nears: 0, boss: !!p.boss, hp: p.hp || 0,
     ai: p.bot ? newAI(w, p.skill != null ? p.skill : 0.75, !!p.rogue) : null,
   };
   w.comets.push(c);
@@ -679,8 +684,8 @@ function removeComet(w, pid) {
   if (i >= 0) { scatterTail(w, w.comets[i], 0); w.comets.splice(i, 1); }
 }
 
-function nearestAnchor(w, x, y) {
-  let best = -1, bd = CFG.LATCH_RANGE * CFG.LATCH_RANGE;
+function nearestAnchor(w, x, y, range = CFG.LATCH_RANGE) {
+  let best = -1, bd = range * range;
   for (let i = 0; i < w.anchors.length; i++) {
     const A = w.anchors[i]; if (A.off) continue;
     const d = dist2(x, y, A.x, A.y); if (d < bd) { bd = d; best = i; }
@@ -697,7 +702,7 @@ function stepComet(w, c, held, dt) {
     if (c.speed >= CFG.SLING_SPEED * CFG.MAX_SPEED && !c.rogue) ev(w, { type: 'sling', pid: c.pid, x: c.x, y: c.y, vx: c.vx, vy: c.vy });
   }
   if (held && c.latch < 0 && c.freeT >= CFG.LATCH_COOLDOWN) {
-    const ai = nearestAnchor(w, c.x, c.y);
+    const ai = nearestAnchor(w, c.x, c.y, CFG.LATCH_RANGE * (1 + 0.3 * perk(w, c, 'reach')));
     if (ai >= 0) {
       const A = w.anchors[ai], dx = c.x - A.x, dy = c.y - A.y, r = Math.hypot(dx, dy) || 1;
       c.latch = ai; c.orbitR = Math.max(CFG.MIN_ORBIT_R, r); c.ang = Math.atan2(dy, dx);
@@ -720,7 +725,7 @@ function stepComet(w, c, held, dt) {
   }
   if (c.latch >= 0) {
     const A = w.anchors[c.latch];
-    c.speed = Math.min(CFG.MAX_SPEED, c.speed + CFG.SPIN_ACCEL * (1 + 0.5 * perk(w, c, 'spin')) * dt);
+    c.speed = Math.min(CFG.MAX_SPEED, c.speed + CFG.SPIN_ACCEL * dt);
     const dAng = c.speed / c.orbitR * dt;
     c.ang += c.dir * dAng; c.orbitAcc += dAng;
     const ca = Math.cos(c.ang), sa = Math.sin(c.ang);
@@ -728,7 +733,7 @@ function stepComet(w, c, held, dt) {
     c.vx = -sa * c.dir * c.speed; c.vy = ca * c.dir * c.speed;
   } else {
     c.freeT += dt;
-    const drag = CFG.FREE_DRAG * Math.pow(0.5, perk(w, c, 'slip'));
+    const drag = CFG.FREE_DRAG;
     if (c.speed > CFG.MIN_SPEED) c.speed += (CFG.MIN_SPEED - c.speed) * (1 - Math.exp(-drag * dt));
     const m = Math.hypot(c.vx, c.vy) || 1; c.vx = c.vx / m * c.speed; c.vy = c.vy / m * c.speed;
     c.x += c.vx * dt; c.y += c.vy * dt;
@@ -848,7 +853,7 @@ function bank(w, c) {
   const n = hues.length, set = setBonus(hues);
   const mult = (w.supernova ? 2 : 1) * set.mult * (1 + 0.25 * perk(w, c, 'greed'));
   const pts = Math.round(tri(n) * mult);
-  if (!c.rogue) { c.score += pts; w.teamScore += pts; c.banked += n; c.best = Math.max(c.best, n); }
+  if (!c.rogue) { c.score += pts; w.teamScore += pts; c.banked += n; c.best = Math.max(c.best, n); if (isPvE(w)) w.waveBanked += n; }
   ev(w, { type: 'bank', pid: c.pid, n, pts, mult: w.supernova ? 2 : 1, set: set.name, setMult: set.mult, hue: set.hue, x: c.x, y: c.y, trail, rogue: c.rogue, linked, unst: hues.includes(3) });
   if (isPvE(w) && !c.rogue && n >= CFG.LIFE_BANK_THRESHOLD && w.lives < CFG.MAX_LIVES) {
     w.lives++; ev(w, { type: 'life', x: c.x, y: c.y });
@@ -913,12 +918,14 @@ function stepWorld(w, inputs) {
   if (playing) {
     w.elapsed += DT;
     if (isPvE(w)) {
-      const wave = 1 + Math.floor(w.elapsed / CFG.WAVE_SECONDS);
-      if (wave !== w.wave) {
-        w.wave = wave; ev(w, { type: 'wave', n: wave }); syncRogues(w);
-        if (wave % CFG.BOSS_EVERY === 0 && !w.demo) spawnBoss(w);
-        for (const c of w.comets) if (!c.rogue) c.plates = w.perks.plating || 0;
-        startDraft = !w.demo;
+      // a wave clears when its objective is met: bank enough stardust, or beat the boss
+      const cleared = isBossWave(w) ? !w.bossName : w.waveBanked >= waveGoal(w);
+      if (cleared && !w.demo) {
+        w.wave++; w.waveBanked = 0;
+        ev(w, { type: 'wave', n: w.wave, goal: waveGoal(w), boss: isBossWave(w) }); syncRogues(w);
+        if (isBossWave(w)) spawnBoss(w);
+        for (const c of w.comets) if (!c.rogue) { c.plates = w.perks.plating || 0; c.deflect = w.perks.deflector || 0; }
+        startDraft = true;
       }
       w.drift = w.wave >= 4 ? Math.min(70, (w.wave - 3) * 18) : 0;
       if ((w.astT -= DT) <= 0) { w.astT = 1.3; if (w.asteroids.length < Math.min(w.wave + (w.wave > 2 ? 1 : 0), 12)) spawnAsteroidFromEdge(w); }
@@ -1022,7 +1029,12 @@ function stepWorld(w, inputs) {
     for (const c of w.comets) {
       if (c.dead || c.inv > 0) continue;
       const ad2 = dist2(c.x, c.y, a.x, a.y), hitR = a.r * 0.85 + CFG.HEAD_R * 0.6 + (c.boss ? CFG.HEAD_R : 0);
-      if (ad2 < hitR * hitR) { if (c.boss) { a.gone = true; hurtBoss(w, c, null); } else crash(w, c, 'rock'); continue; } // forgiving hitbox
+      if (ad2 < hitR * hitR) { // forgiving hitbox
+        if (c.boss) { a.gone = true; hurtBoss(w, c, null); }
+        else if (!c.rogue && c.deflect > 0) { c.deflect--; scatterTail(w, c, 0); c.inv = 1.5; a.gone = a.meteor; ev(w, { type: 'deflect', pid: c.pid, x: c.x, y: c.y }); }
+        else crash(w, c, 'rock');
+        continue;
+      }
       if (!c.rogue && c.nearT <= 0 && ad2 < (hitR + CFG.NEAR_ROCK) ** 2) graze(w, c, 1, 'rock');
       for (let j = 0; j < c.tail.length; j++) {
         const m = c.tail[j];
@@ -1280,6 +1292,8 @@ const MONO = '"JetBrains Mono","SF Mono","Cascadia Mono",ui-monospace,Consolas,m
 
 // Line icons (24×24, stroked). Used both as inline SVG in menus and as Path2D on the canvas.
 const ICONS = {
+  reach: 'M12 3v4M12 17v4M3 12h4M17 12h4M12 8a4 4 0 1 0 .01 0',
+  deflector: 'M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6zM8.5 12l2.5 2.5 4.5-4.5',
   magnet: 'M5 3h4v9a3 3 0 0 0 6 0V3h4v9a7 7 0 0 1-14 0zM5 7h4M15 7h4',
   heatsink: 'M12 2v20M4 7l16 10M4 17 20 7M9 4l3 2 3-2M9 20l3-2 3 2',
   plating: 'M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z',
@@ -1374,7 +1388,8 @@ const FX = {
       case 'overheat': this.burst(e.x, e.y, 16, '#ff6a3d', 60, 200, 0.6, 2.4); this.ring(e.x, e.y, '#ff6a3d', 8, 60, 0.4, 2); SND.overheat(); break;
       case 'spawn': this.ring(e.x, e.y, col, 70, 8, 0.5, 2); break;
       case 'count': SND.count(e.n === 0); break;
-      case 'wave': if (e.n % CFG.BOSS_EVERY) this.say('Wave ' + String(e.n).padStart(2, '0'), e.n === 3 ? 'Rogue comets incoming' : e.n === 4 ? 'The pegs begin to drift' : 'More rocks in the field', '#ffffff', 2.4, 'Incoming'); SND.wave(); break;
+      case 'wave': if (!e.boss) this.say('Wave ' + String(e.n).padStart(2, '0'), 'Objective: bank ' + e.goal + ' stardust' + (e.n === 3 ? ' · rogue comets incoming' : e.n === 4 ? ' · the pegs begin to drift' : ''), '#ffffff', 2.8, 'Wave cleared — next up'); SND.wave(); break;
+      case 'deflect': this.ring(e.x, e.y, '#9eeeff', 6, 70, 0.5, 2); this.text(e.x, e.y - 30, 'DEFLECTED', '#9eeeff', 14, 1.1); this.kick(8); SND.bump(); break;
       case 'supernova': this.say('Supernova', 'The corona swells — every bank pays double', '#ff9a3d', 2.8, 'Final 20 seconds'); SND.alarm(); this.flash = 0.35; this.flashColor = '#ffb347'; this.kick(8); break;
       case 'life': this.text(e.x, e.y - 30, '+1 HULL', '#7cf29a', 15, 1.4); SND.life(); break;
       case 'claim': this.ring(e.x, e.y, col, 8, 52, 0.5, 2); this.burst(e.x, e.y, 12, col, 60, 180, 0.5, 2.2); if (mine) { this.text(e.x, e.y - 34, 'PEG CLAIMED', col, 12, 1); SND.latch(); SND.count(true); } break;
@@ -1433,7 +1448,7 @@ const Render = {
     this.cv.width = this.cw * this.dpr | 0; this.cv.height = this.ch * this.dpr | 0;
     this.bloom.width = Math.max(1, this.cv.width / 4 | 0); this.bloom.height = Math.max(1, this.cv.height / 4 | 0);
     this.portrait = this.ch > this.cw * 1.08;
-    const top = this.cw < 640 ? 118 : 92, side = 12;
+    const top = this.cw < 900 ? 150 : 104, side = 12; // room for scoreboard + wave objective
     this.s = this.portrait ? Math.min((this.ch - top - side) / CFG.W, (this.cw - side * 2) / CFG.H) : Math.min((this.cw - side * 2) / CFG.W, (this.ch - top - side) / CFG.H);
     this.oy = (top - side) / 2;
     this.buildBg();
@@ -1633,7 +1648,7 @@ const Render = {
   // PEGS: precise instrument marks — ring, center pin, four ticks. Things you SWING on.
   drawAnchors(g, v, o, t) {
     const aims = {}; this.aimLabels = [];
-    for (const c of v.comets) if (o.localPids.has(c.pid) && !c.dead && c.latch < 0) { const i = nearestAnchor(v, c.x, c.y); if (i >= 0) (aims[i] = aims[i] || []).push(c.color); }
+    for (const c of v.comets) if (o.localPids.has(c.pid) && !c.dead && c.latch < 0) { const i = nearestAnchor(v, c.x, c.y, CFG.LATCH_RANGE * (1 + 0.3 * ((v.perks && v.perks.reach) || 0))); if (i >= 0) (aims[i] = aims[i] || []).push(c.color); }
     v.anchors.forEach((A, i) => {
       g.save(); g.translate(A.x, A.y);
       if (A.off) {
@@ -1876,12 +1891,17 @@ const Render = {
       this.label(g, score.toLocaleString(), pad - 2, top + 30, narrow ? 34 : 44, '#ffffff', 300, 'left', -1, true);
       if (!coop) this.label(g, 'BEST ' + Math.max(best, score).toLocaleString(), pad, top + 60, 11, '#ffd27a', 500, 'left', 1.5, true);
       else v.comets.filter(c => !c.rogue).forEach((c, i) => this.label(g, c.name.slice(0, 8) + ' ' + c.score.toLocaleString(), pad + i * (narrow ? 90 : 120), top + 60, 11, c.color, 500, 'left', 0.5, true));
-      // wave + progress
-      const wx = narrow ? W - pad - 120 : W / 2 - 60, wy = narrow ? top + 70 : top;
-      this.eyebrow(g, 'Wave', wx, wy);
-      this.label(g, String(v.wave).padStart(2, '0'), wx + 120, wy, 18, '#ffffff', 400, 'right', 0, true);
-      const prog = ((v.elapsed || 0) % CFG.WAVE_SECONDS) / CFG.WAVE_SECONDS;
-      g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(wx, wy + 14, 120, 1); g.fillStyle = '#a98bff'; g.fillRect(wx, wy + 14, 120 * prog, 1); g.shadowBlur = 10;
+      // wave objective: what you must do to clear this wave, with live progress
+      const stack = W < 900, ow = stack ? Math.min(260, W - 2 * pad) : 260, ox = (W - ow) / 2, oy = stack ? top + 92 : top; // stacked below the score row on smaller screens
+      const boss = v.comets.find(c => c.boss), bossWave = isBossWave(v);
+      let goalTxt, prog, col = '#a98bff';
+      if (bossWave && v.hole) { goalTxt = 'Survive the Singularity · ' + Math.ceil(v.hole.life) + 's'; prog = 1 - clamp(v.hole.life / v.hole.max, 0, 1); col = '#ff4d6d'; }
+      else if (bossWave && boss) { goalTxt = 'Defeat the Devourer · slice its tail'; prog = 1 - boss.hp / (boss.maxHp || boss.hp || 1); col = '#ff4d6d'; }
+      else if (bossWave && v.bossName) { goalTxt = 'Defeat ' + v.bossName.toLowerCase().replace(/(^|\s)\w/g, m => m.toUpperCase()); prog = 0; col = '#ff4d6d'; }
+      else { const goal = waveGoal(v), have = Math.min(goal, v.waveBanked || 0); goalTxt = 'Bank ' + have + ' / ' + goal + ' stardust'; prog = have / goal; }
+      this.eyebrow(g, 'Wave ' + String(v.wave).padStart(2, '0') + (bossWave ? ' · boss' : ' · objective'), ox, oy, bossWave ? '#ff6b85' : '#8b90a8');
+      this.label(g, goalTxt, ox, oy + 19, narrow ? 13 : 15, '#ffffff', 500, 'left');
+      g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(ox, oy + 34, ow, 2); g.fillStyle = col; g.fillRect(ox, oy + 34, ow * clamp(prog, 0, 1), 2); g.shadowBlur = 10;
       // hull pips
       const maxL = coop ? Math.max(CFG.COOP_LIVES, v.lives) : CFG.MAX_LIVES, hx = narrow ? W - pad - 110 : W - 128 - maxL * 16, hy = narrow ? top + 44 : top;
       if (!narrow) this.eyebrow(g, 'Hull', hx - 46, hy);
@@ -1913,8 +1933,8 @@ const Render = {
       this.label(g, str, W / 2, ty + 8, narrow ? 24 : 32, v.supernova ? '#ff9a3d' : '#ffffff', 300, 'center', 0, true);
     }
     g.shadowBlur = 0;
-    // boss bar
-    if (v.hole || (v.comets.some(c => c.boss))) {
+    // boss bar (versus never has bosses; solo/co-op show it inside the objective panel)
+    if (false) {
       const bw = Math.min(360, W - 40), bx = (W - bw) / 2, by = narrow ? 128 : 80;
       const boss = v.comets.find(c => c.boss), frac = v.hole ? clamp(v.hole.life / v.hole.max, 0, 1) : boss ? boss.hp / (boss.maxHp || boss.hp || 1) : 0;
       this.eyebrow(g, v.hole ? 'The Singularity · collapses in ' + Math.ceil(v.hole.life) + 's' : 'The Devourer', W / 2, by - 10, '#ff6b85', 'center');
@@ -2123,7 +2143,7 @@ function encodeSnapshot(w, ack) {
   return JSON.stringify({
     t: 's', k: w.tick, ph: w.phase, cd: r3(w.countdown), tl: r1(w.timeLeft), sn: w.supernova ? 1 : 0, el: r1(w.elapsed), ly: w.layout, ack,
     md: w.mode, lv: w.lives, wv: w.wave, ts: w.teamScore, ld: w.leader, pk: w.perks, dr: w.draft, dt: r1(w.draftT),
-    hl: w.hole ? [Math.round(w.hole.x), Math.round(w.hole.y), r1(w.hole.life), w.hole.max] : 0, fl: r1(w.flare),
+    hl: w.hole ? [Math.round(w.hole.x), Math.round(w.hole.y), r1(w.hole.life), w.hole.max] : 0, fl: r1(w.flare), wb: w.waveBanked, bn: w.bossName,
     c: w.comets.map(c => [c.pid, r1(c.x), r1(c.y), r1(c.vx), r1(c.vy), c.latch, c.tail.length, c.dead ? 1 : 0, c.inv > 0 ? r1(c.inv) : 0,
       c.score, r3(c.ang), r1(c.orbitR), c.dir, r1(c.speed), Math.min(9, r1(c.freeT)), c.held ? 1 : 0, c.rogue ? 1 : 0,
       c.tail.map(m => m.h < 0 ? 0 : m.h).join(''), r1(c.unstableT), r1(c.claimT), c.boss ? 1 : 0, c.hp || 0, c.maxHp || 0]),
@@ -2459,7 +2479,7 @@ const Guest = {
       overT: this.overT || 0,
       anchors: M.a.map(A => ({ x: A[0], y: A[1], heat: A[2], off: !!A[3], owner: A[4] == null ? -1 : A[4] })),
       leader: M.ld == null ? -1 : M.ld, perks: M.pk || {}, draft: M.dr || null, draftT: M.dt || 0,
-      hole: M.hl ? { x: M.hl[0], y: M.hl[1], life: M.hl[2], max: M.hl[3] } : null, flare: M.fl || 0,
+      hole: M.hl ? { x: M.hl[0], y: M.hl[1], life: M.hl[2], max: M.hl[3] } : null, flare: M.fl || 0, waveBanked: M.wb || 0, bossName: M.bn || '',
       dust: [], asteroids: [], comets: [],
     };
     if (M.ph === 'over') this.overT = (this.overT || 0) + 1 / 60; else this.overT = 0;
