@@ -1,0 +1,16 @@
+{
+  "name": "comet-tails-relay",
+  "version": "1.0.0",
+  "description": "Optional relay for Comet Tails: room codes, quick match and WebRTC signalling. Also serves the game.",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}

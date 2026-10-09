@@ -1,32 +1,37 @@
 # Comet Tails
 
-**Sling · Steal · Bank.** A one-button orbital slingshot game in a single HTML file. No dependencies, no build step, no server.
+**Sling · Steal · Bank.** A one-button orbital slingshot game in a single HTML file. No dependencies, no build step, and no server needed to play.
 
-Hold to grapple the nearest anchor star and orbit it. Release to fling off. Sweep up stardust to grow your tail, then graze the sun's corona to bank it. Payouts are triangular (a tail of *n* pays 1+2+…+n), so long tails pay hugely. But anything that crosses your tail severs it, and the sun's core is lethal.
+## What's on screen
+
+| | Looks like | What it does |
+|---|---|---|
+| **Peg** | cyan ring with a crosshair | **Hold** to grapple it and swing around. The peg you'd grab right now is ringed in your color. |
+| **Stardust** | small gold sparkle | Fly through it to grow your tail. Dust near your comet drifts toward you. |
+| **Prism** | big pink sparkle | Worth 3 stardust. |
+| **Corona** | dashed ring around the sun | Graze it to **bank** your tail. A tail of *n* pays 1+2+…+n, so long tails pay hugely. The white core is lethal. |
+
+Release the button to fling off in a straight line. Anything that crosses your tail severs it and scatters the dust.
 
 ## Play
 
-Open `index.html` in any modern desktop or mobile browser. You can also enable GitHub Pages on this repo and play it at `https://<user>.github.io/comet-tails/`.
+Open `index.html` in any modern desktop or mobile browser. You can also enable **GitHub Pages** (Settings → Pages → `main` / root) and play at `https://eseto9.github.io/Comet-Tails/`.
 
 ## Modes
 
 | Mode | Description |
 |---|---|
-| **Solo** | 3 hulls and escalating waves: asteroids, rogue comets that hunt your tail, drifting stars. Bank a tail of 20+ to repair a hull. High scores are saved locally. |
-| **Local Versus** | 2–4 players on one device, with optional bots. A 2-minute match whose last 20 s is a **Supernova**: the corona grows and banks pay ×2. |
-| **Online Duel** | Peer-to-peer over WebRTC with up to 4 players, joined by copy/paste invite and answer codes. No server. |
+| **Solo** | 3 hulls and escalating waves: asteroids, rogue comets that hunt your tail, drifting pegs. Bank a tail of 20+ to repair a hull. |
+| **Daily Constellation** | The same seeded sky for everyone each day. Your best run today is saved as input data and replayed as a white **ghost** to race. |
+| **Local Versus** | 2–4 players on one device, with optional bots. A 2-minute match whose final 20 s is a **Supernova** (bigger corona, ×2 banks). |
+| **Local Co-op: Comet Train** | Team up against the waves with a shared hull pool and no friendly fire. Teammates joined by the dashed link beam bank **together as one tail**, so 10 + 10 pays 210 instead of 55 + 55. |
+| **Online** | Versus or Co-op for up to 4 players over WebRTC peer-to-peer, joined by copy/paste invite codes. With the optional relay, you can use **room codes** and **Quick Match** instead. |
 
 ## Controls
 
 - **Solo / Online:** Space (or A, L, V, ↑, W), tap or hold anywhere, or any gamepad button
 - **Local:** P1 `A` · P2 `L` · P3 `V` · P4 `↑` · gamepads · touch left/right half of the screen
 - `Esc` / `P` pauses · `M` mutes
-
-## Multiplayer mechanics
-
-- **Tail slicing:** fly through a rival's tail to scatter their dust, then grab it.
-- **Shared heat:** anchor stars overheat when orbited too long, for everyone.
-- **Head bumps:** colliding heads knock both comets off their orbits.
 
 ## Netcode
 
@@ -37,14 +42,31 @@ The host runs the only real simulation, at a fixed 60 Hz. Guests send their butt
 - **Fairness:** the host's own input is delayed by half the round-trip time, so hosting gives no advantage.
 - **Leaving and joining:** a player who disconnects is replaced by a bot, and players can join a match already in progress.
 
-## Testing online locally
+## Optional relay server (room codes, quick match, TURN)
+
+`server/relay.js` is a small Node server that does matchmaking and WebRTC signalling only. Gameplay still flows peer-to-peer. It also serves the game with the relay URL pre-filled.
+
+```bash
+cd server
+npm install
+npm start
+```
+
+Then open `http://localhost:8787` and choose **Online → Room codes & Quick match**.
+
+- **Deploy:** works on any Node host (Render, Fly.io, Railway, a VPS). Players then use `wss://your-host`, or set `CFG.RELAY_URL` in `index.html` to make it the default.
+- **Strict networks:** set `ICE_SERVERS` to a JSON array that includes a TURN server, and the relay hands it to clients:
+  ```bash
+  ICE_SERVERS='[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]' npm start
+  ```
+- **Next step:** the simulation code has no DOM dependencies, so it could run on the server itself for server-authoritative ranked play.
+
+## Testing online without a server
 
 1. Open `index.html` in two tabs.
-2. Tab A: **Online Duel → Host a room → Create invite code**, then copy it.
+2. Tab A: **Online → Host a room → Create invite code**, then copy it.
 3. Tab B: **Join a room**, paste the invite, then **Create answer code** and copy it.
-4. Tab A: paste the answer and press **Connect**. Both players press **Ready**.
-
-Across networks it uses public STUN servers. Two networks with strict NATs may need a TURN server.
+4. Tab A: paste the answer and press **Connect**. The host can switch between Versus and Co-op in the lobby. Both players press **Ready**.
 
 ## Tuning
 
